@@ -44,7 +44,7 @@ def field(body: str, name: str) -> str | None:
         return "".join(out)
     if rest.startswith('"'):
         return rest[1:].split('"', 1)[0]
-    return re.split(r"[,\n]", rest, 1)[0].strip()
+    return re.split(r"[,\n]", rest, maxsplit=1)[0].strip()
 
 
 def norm(s: str) -> str:
