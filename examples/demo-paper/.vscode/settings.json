@@ -1,0 +1,10 @@
+{
+  "files.readonlyInclude": {
+    "ai-log/**": true
+  },
+  "editor.wordWrap": "on",
+  "latex-workshop.latex.outDir": "%DIR%/build",
+  "latex-workshop.latex.recipe.default": "latexmk (lualatex)",
+  "ltex.language": "en-US",
+  "pandocciter.DefaultBibs": ["${workspaceFolder}/literature/references.bib"]
+}

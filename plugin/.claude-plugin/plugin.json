@@ -1,0 +1,99 @@
+{
+  "name": "cw",
+  "version": "0.1.0",
+  "description": "Assist-only academic co-writing following DFG good scientific practice: hints instead of ghostwriting, a complete AI log, generated AI disclosure, and a pixel-art review party.",
+  "author": {
+    "name": "CoWriting contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "academic-writing",
+    "thesis",
+    "latex",
+    "markdown",
+    "zotero",
+    "obsidian",
+    "research-integrity"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "obsidianVault": {
+      "type": "string",
+      "title": "Obsidian vault",
+      "description": "Absolute path to your Obsidian vault (optional). Claude reads it as your knowledge base.",
+      "default": ""
+    },
+    "aiNotesFolder": {
+      "type": "string",
+      "title": "AI notes folder",
+      "description": "Folder inside the vault where AI-generated notes go, clearly marked.",
+      "default": "AI-Notes"
+    },
+    "language": {
+      "type": "string",
+      "title": "Default language",
+      "description": "Default language for new papers and disclosures.",
+      "default": "en",
+      "options": [
+        "en",
+        "de"
+      ]
+    },
+    "domainPack": {
+      "type": "string",
+      "title": "Domain pack",
+      "description": "Extra personas for your field.",
+      "default": "none",
+      "options": [
+        "none",
+        "medicine"
+      ]
+    },
+    "autosave": {
+      "type": "boolean",
+      "title": "Autosave to git",
+      "description": "Commit the manuscript and the AI log after each change (once you pause for 30 s), under your own git name, so the history shows how your text grew next to the AI input. Only manuscript/ and ai-log/ are committed.",
+      "default": true
+    },
+    "game": {
+      "type": "boolean",
+      "title": "Gamification",
+      "description": "Show XP, levels and achievements for your own writing.",
+      "default": true
+    },
+    "zoteroLocalApi": {
+      "type": "boolean",
+      "title": "Zotero local API",
+      "description": "Search your running Zotero 7 (enable 'Allow other applications on this computer to communicate with Zotero' in Zotero settings).",
+      "default": true
+    },
+    "watchModel": {
+      "type": "string",
+      "title": "Live review model",
+      "description": "Model for /watch live hints while you write (a small, fast one keeps it cheap), e.g. haiku.",
+      "default": "haiku"
+    },
+    "focusMode": {
+      "type": "string",
+      "title": "Focus mode",
+      "description": "How much of Claude Code's own work the transcript shows: off (all), calm (one dim line per action), focus (only you and the personas). /quiet switches it per session.",
+      "default": "calm",
+      "options": [
+        "off",
+        "calm",
+        "focus"
+      ]
+    },
+    "usageMeter": {
+      "type": "string",
+      "title": "Usage meter",
+      "description": "Token counter in the pane and status line; with limits it also watches the 5-hour and weekly limits of a Pro/Max plan and warns at 80 % and 95 %.",
+      "default": "tokens+limits",
+      "options": [
+        "off",
+        "tokens",
+        "tokens+limits"
+      ]
+    }
+  }
+}

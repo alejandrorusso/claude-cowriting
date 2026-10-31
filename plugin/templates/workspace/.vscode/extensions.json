@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "anthropic.claude-code",
+    "james-yu.latex-workshop",
+    "ltex-plus.vscode-ltex-plus",
+    "mblode.zotero",
+    "yzhang.markdown-all-in-one",
+    "notZaki.pandocciter"
+  ]
+}

@@ -1,0 +1,20 @@
+# LaTeX build files
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.pdf
+# OS / editor
+.DS_Store
+.obsidian/workspace*.json
+# Keep ai-log/ and disclosure/ under version control: they document AI use.
+# Model papers for the Style Coach are other people's work
+literature/style-models/*
+!literature/style-models/README.md

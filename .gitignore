@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+# Type declarations Claude Code lays beside a hot-loaded plugin
+plugin/.claude-plugin/types/
+# Per-user game state in the demo
+examples/**/.cowriting/game.json
+examples/**/literature/style-models/*
+!examples/**/literature/style-models/README.md
