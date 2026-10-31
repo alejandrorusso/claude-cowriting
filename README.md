@@ -15,7 +15,7 @@ CoWriting turns these rules into features:
 
 | Rule | What the plugin does |
 |---|---|
-| You are the author | `manuscript/` is **read-only for Claude**. A hook refuses the edits it can recognise, including from subagents and shell commands, and records every change to the manuscript it detects during a tool call anyway (see [The manuscript guard](#the-manuscript-guard)). |
+| You are the author | `manuscript/` is **read-only for Claude**, and so is every other file of yours in the paper: Claude writes only in `notes/ai/`, the log, the plan and the disclosure. A hook refuses the edits it can recognise, including from subagents and shell commands, the workspace's deny rules and sandbox refuse what the hook cannot see, and every change to your files detected during a tool call is recorded anyway (see [The manuscript guard](#the-manuscript-guard)). |
 | Transparency | Every prompt and answer is logged automatically to `ai-log/` (append-only, timestamped, with the model and plugin versions). |
 | Disclosure | `/cw:disclosure` turns the log into an **AI register** (EN/DE, Markdown/LaTeX) for your declaration of authorship or your journal, and into a prompts appendix where one is required. |
 | Responsibility | You classify each AI input: **✓ used** (adopted), **✎ changed** (adapted), **✗ not used** (rejected) or **ℹ info**. The card shows who said it, what you asked and what it said. Claude never decides this for you. |
@@ -37,7 +37,6 @@ Answer `y` to add the marketplace, then pick a scope (user scope is recommended)
 |---|---|
 | Obsidian vault | Path to your vault. Claude reads it as your knowledge base and writes only to an `AI-Notes/` folder there. |
 | Default language | `en` or `de` |
-| Domain pack | `none` or `medicine` (adds *The Clinician*) |
 | Autosave to git | On by default: commits `manuscript/` and `ai-log/` after each change, once you've paused for 30 s, under your own git name, with the words gained or lost and the new AI log entries in the message. Nothing else is committed. |
 | Gamification | XP, levels and achievements on or off |
 | Zotero local API | Search your running Zotero 7 |
@@ -59,7 +58,7 @@ Claude asks four questions:
 - LaTeX or Markdown
 - English or German
 - this folder or a new `projects/<name>/` (for several papers in one folder)
-- the domain pack
+- who joins your review party: the nine general personas, The Clinician for medical texts, and any expert of your own (an ontologist, a general practitioner, a neurologist, a lawyer: whoever your field needs). Claude interviews you about each expert you ask for and writes it down as `party/<id>.md`.
 
 You get:
 
@@ -68,6 +67,7 @@ manuscript/            ← you write here (main.tex or main.md); Claude can only
 literature/references.bib  ← Zotero auto-export
 literature/style-models/   ← papers whose style you like (for the Style Coach)
 party.md               ← your briefing: what each persona should look for in this project
+party/                 ← your own experts, one <id>.md each (the catalogue members are listed in paper.json)
 notes/ai/              ← AI notes, clearly marked
 ai-log/                ← automatic log of every AI interaction
 disclosure/            ← generated AI register
@@ -112,6 +112,7 @@ The CoWriting pane works in the terminal and in the VS Code extension.
 | `/cw:ask <persona> <question>` | Talk to one persona directly, e.g. `/cw:ask terminologist is "sleep architecture" the usual term?` |
 | `/cw:brief [persona\|all] [text]` | Tell a persona what to look for **in this project**. Without text it interviews you and saves your answers; with text it saves them directly. Without arguments it lists all briefs. |
 | `/cw:summon <persona> [file]` | Asks one party member for feedback, e.g. `/cw:summon statistics-nerd manuscript/methods.tex` |
+| `/cw:party [add\|remove <id …> \| new <id> "<Name>" <role>]` | Who is in your review party. `add`/`remove` change the catalogue members, `new` creates an expert of your own after a short interview (see below). |
 | `/cw:feedback` | Writing-center style feedback on a section: problems with their location, guiding questions, no rewrites |
 | `/cw:socratic` | One question at a time, to think a section through before writing it |
 | `/cw:structure` | Reverse outline, argument map and red-thread check |
@@ -169,15 +170,22 @@ You can insist. Claude then marks the passage `[AI-TEXT]`, the log flags it, and
 
 ### The manuscript guard
 
-Three layers keep Claude out of `manuscript/`, and each has a known reach:
+Inside a paper, Claude writes only in its own places: `notes/ai/`, `ai-log/`, `disclosure/`, `scope.md` (your answers to the plan), `party/` (your own experts, from your answers), `.cowriting/` and `build/`. Everything else is yours: `manuscript/`, `literature/`, `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/`. Four layers keep it that way, and each has a known reach:
 
-1. **File tools** (Write, Edit, …) are refused by path. Case is ignored and `..` is resolved, so `Manuscript/` or `notes/../manuscript/` are covered.
-2. **Shell commands** are refused by pattern: a redirect into the folder, a `cd` into it, or a writing command (`sed -i`, `cp`, `--write`, `-o`, an editor, an inline script) with the folder among its words. A pattern can be fooled, by a shell variable, a script file or a symlink.
-3. **After any writing tool ran**, the manuscript's files are compared with how they were before. A change is logged as a `guard` entry with the tool and the files, shown above the prompt, counted in the pane and listed in the disclosure under *Manuscript changes detected during AI tool calls*. Check the git diff when you see one.
+1. **File tools** (Write, Edit, …) are refused by path. A `manuscript` folder is refused wherever it is; every other file is refused when it lies in the paper and outside Claude's places. Case is ignored and `..` is resolved, so `Manuscript/` or `notes/ai/../../party.md` are covered. The refusal names the file and tells Claude to ask you.
+2. **Shell commands** are refused by pattern: a redirect into one of your files, a `cd` into one of your folders, or a writing command (`sed -i`, `cp`, `--write`, `-o`, an editor, an inline script) with one of your folders or files among its words as a path. A pattern can be fooled, by a shell variable, a script file or a symlink.
+3. **The workspace's settings** (`.claude/settings.json`, written by `/cw:init`) add Claude Code's own enforcement: `Edit` deny rules for your files, which also bind subagents, and the Bash sandbox with your folders on its write deny list, so the operating system refuses a shell write whatever the command looks like. With the sandbox on, Claude Code runs sandboxed commands without a permission prompt (its default; set `sandbox.autoAllowBashIfSandboxed` to `false` to keep the prompts). The sandbox also cuts the shell off from the network: the settings allow `doi.org` and `api.crossref.org` for `verify_refs.py`, and on macOS the local Zotero API; on Linux the Zotero search needs `sandbox.excludedCommands`. Any other host prompts you once. In the `projects/<name>/` layout the rules live at the workspace root, one paper after another.
+4. **After any writing tool ran**, your files are compared with how they were before. A change is logged as a `guard` entry with the tool and the files, shown above the prompt, counted in the pane and, for manuscript files, listed in the disclosure under *Manuscript changes detected during AI tool calls*. Check the git diff when you see one.
 
-The guard refuses what it can recognise and records what it cannot. It does not make an AI write impossible, and the disclosure says exactly that. What it cannot see at all is text you paste from the chat yourself. For that, the `[AI-TEXT]` marker and your own annotations are the record.
+The guard refuses what it can recognise, the sandbox refuses what the patterns cannot see, and the comparison records the rest. For a technical guarantee that holds even with the plugin off, run Claude Code in a container with `manuscript/` and `literature/` mounted read-only and edit on the host. What no layer can see is text you paste from the chat yourself. For that, the `[AI-TEXT]` marker and your own annotations are the record.
 
 ## The review party
+
+### Composing your party
+
+Every paper has its own party, and you compose it. `/cw:init` asks who joins; `/cw:party` shows the roster, `/cw:party add reviewer-2` and `/cw:party remove clinician` change the catalogue members (kept in `paper.json`), and only the members are offered to Claude and shown in the pane.
+
+An expert the catalogue lacks, you make yourself: `/cw:party new neurologist "The Neurologist" clinical neurology, diagnostics` writes a skeleton to `party/neurologist.md` and Claude interviews you about the field, what the expert looks at, what counts as evidence there and how they speak, then fills the file in. The file is a short Markdown document: frontmatter with `name`, `short`, `role`, `category` and `colour`, then the persona's perspective and voice. Edit it any time. The plugin appends the party's shared ground rules (hints and questions only, no text, nothing invented) and registers the expert as the `cw:<id>` agent from the next turn on, with read-only tools; it gets a sprite in the pane, a section in `party.md` when you brief it, and levels like the others. To retire one, delete its file.
 
 ### Briefing the party for your project
 
@@ -187,7 +195,7 @@ Each paper has a `party.md` file, written by you:
 
 The plugin attaches the matching sections to a persona's task every time it reviews, whether you summoned it, asked it a question, or it's watching live. `/cw:init` asks about the project and fills in `everyone`. After that you can brief a persona at any time: `/cw:brief <persona>` starts a short interview, or edit `party.md` directly. In the pane, 📋 marks the personas you've briefed.
 
-Each persona is a read-only subagent that looks at your text from one perspective. Each one gives hints and questions, never replacement text.
+Each persona is a read-only subagent that looks at your text from one perspective. Each one gives hints and questions, never replacement text. The catalogue that ships with the plugin:
 
 | | Persona | Perspective |
 |---|---|---|
@@ -200,7 +208,7 @@ Each persona is a read-only subagent that looks at your text from one perspectiv
 | ![](docs/img/lay-reader.png) | **The Lay Reader** | Clarity for non-experts |
 | ![](docs/img/style-coach.png) | **The Style Coach** | Writing style compared with papers you like: put 3–5 of them into `literature/style-models/` (git-ignored). It measures sentence rhythm, voice, hedging and connectors with `style_profile.py`, then gives hints on patterns, never sentences to copy. |
 | ![](docs/img/terminologist.png) | **The Terminologist** | Is this what the field calls it? Flags unusual, outdated or inconsistent terms, names the usual term with a source (thesaurus, guideline, your literature), and asks for a definition where you deviate on purpose. |
-| ![](docs/img/clinician.png) | **The Clinician** *(medicine pack)* | Clinical relevance, patient perspective |
+| ![](docs/img/clinician.png) | **The Clinician** *(not in the default party)* | Clinical relevance, patient perspective, for medical and health texts |
 
 ### The game
 
@@ -234,7 +242,7 @@ python3 scripts/render_sprites.py   # re-render the persona PNGs and the icon
 
 CI runs the same three checks on every push. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for adding personas and domain packs.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adding personas to the catalogue. An expert for your own paper needs no code: `/cw:party new`.
 
 ## License
 

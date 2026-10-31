@@ -4,9 +4,12 @@ import {
   ACHIEVEMENTS,
   EMPTY_STATS,
   NEW_GAME,
+  absolutePath,
   advanceGame,
+  authorFileOf,
   autosaveMessage,
   bashTouchesManuscript,
+  bashWritesTo,
   briefFor,
   categoryFor,
   changedFiles,
@@ -25,12 +28,15 @@ import {
   usageParts,
   watchExcerpt,
 } from '../hooks/core'
-import { PERSONAS, SHARED_PALETTE } from '../hooks/personas'
+import { DEFAULT_PARTY, PERSONAS, SHARED_PALETTE, isCustomId, parsePersonaFile, partyPersonas, personaFileSkeleton } from '../hooks/personas'
 import { parseCheck, parseScope, scopeProgress } from '../hooks/scope'
 import { rasterCells, svgSource } from '../hooks/sprites'
 import { withLog } from '../hooks/workspace'
 
 const ROOT = '/w'
+
+// the agent types the plugin registered since the workspace was mocked
+const registered: { name: string; prompt: string; tools: string[] }[] = []
 
 // An in-memory workspace answering the plugin's $.fs and $.session calls.
 const workspace = (on: any, files: Map<string, string>) => {
@@ -61,6 +67,11 @@ const workspace = (on: any, files: Map<string, string>) => {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
+  registered.length = 0
+  on('agent.register', (_: unknown, e: { name: string; prompt: string; tools: string[] }) => {
+    registered.push(e)
+    return { value: { agent: `cw:${e.name}` } }
+  })
   on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
 }
 
@@ -127,8 +138,52 @@ test('the guard spots writes into manuscript/ and lets reads through', async () 
     'echo hi > notes/ai/x.md',
     'echo "see manuscript/" > notes/ai/todo.md',
     'git commit -F msg.txt',
+    // the folder's name inside a search pattern or a longer word is not a path
+    'grep -rn "manuscript\\|chmod\\|read-only" plugin/skills docs 2>/dev/null | head -30',
+    'sed -n 540,600p plugin/hooks/register.tsx; grep -rln "settings" plugin/skills; echo manuscripts',
   ]
   for (const command of allowed) expect(bashTouchesManuscript(command), command).toBe(false)
+})
+
+test('inside a paper, everything but Claude\'s own places is the author\'s', async () => {
+  const root = '/w/projects/alpha'
+  expect(authorFileOf(`${root}/literature/references.bib`, root)).toBe('literature/references.bib')
+  expect(authorFileOf(`${root}/CLAUDE.md`, root)).toBe('CLAUDE.md')
+  expect(authorFileOf(`${root}/.claude/settings.json`, root)).toBe('.claude/settings.json')
+  expect(authorFileOf(`${root}/notes/own/ideas.md`, root)).toBe('notes/own/ideas.md')
+  expect(authorFileOf(`${root}/notes/ai/../../party.md`, root)).toBe('party.md')
+  expect(authorFileOf(`/W/Projects/Alpha/Manuscript/main.tex`, root)).toBe('Manuscript/main.tex') // macOS ignores case
+  expect(authorFileOf(`${root}/*/x.md`, root)).toBe('*/x.md') // a glob is never one of Claude's places
+  for (const ok of ['notes/ai/x.md', 'ai-log/2026-10.jsonl', 'disclosure/ai-register.en.md', 'scope.md', '.cowriting/game.json', 'build/main.pdf']) {
+    expect(authorFileOf(`${root}/${ok}`, root), ok).toBeNull()
+  }
+  expect(authorFileOf('/w/projects/beta/CLAUDE.md', root)).toBeNull() // another paper is not this one's business
+  expect(authorFileOf(root, root)).toBeNull()
+  expect(absolutePath('/w', 'literature/x.bib')).toBe('/w/literature/x.bib')
+  expect(absolutePath('/w', '/abs/x')).toBe('/abs/x')
+  expect(absolutePath('/w', '$HOME/x')).toBe('$HOME/x')
+
+  const isAuthors = (t: string) => authorFileOf(absolutePath('/w', t), '/w') !== null
+  const names = ['manuscript', 'literature', 'CLAUDE.md', 'party.md', 'paper.json']
+  const denied = [
+    'echo x > literature/references.bib',
+    'cat a >> CLAUDE.md',
+    'cp notes/ai/x.md party.md',
+    'cd literature && pandoc a.md -o b.md',
+    "sed -i '' 's/a/b/' paper.json",
+    'python3 x.py > /w/literature/out.bib',
+    'cp literature/a.pdf /tmp/', // the pattern cannot tell a source from a target: read the file instead
+  ]
+  for (const command of denied) expect(bashWritesTo(command, isAuthors, names), command).toBe(true)
+  const allowed = [
+    'echo x > notes/ai/x.md',
+    'pdftotext literature/a.pdf -',
+    'python3 tools/verify_refs.py literature/references.bib',
+    'git log -- literature',
+    'echo x > scope.md',
+    'latexmk -outdir=build manuscript/main.tex > /dev/null',
+  ]
+  for (const command of allowed) expect(bashWritesTo(command, isAuthors, names), command).toBe(false)
   // what the text cannot show is left to the comparison after the call
   expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '2:12' })).toEqual(['manuscript/main.tex'])
   expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '1:10', 'manuscript/new.tex': '3:1' })).toEqual(['manuscript/new.tex'])
@@ -202,6 +257,20 @@ test('the plugin refuses edits to the manuscript and allows notes', async ($, on
   expect(bash.deny).toContain('CoWriting')
   const read = await $.tool.call({ tool: 'Bash', command: 'cat manuscript/main.tex' })
   expect(read.deny).toBeUndefined()
+
+  // the rest of the paper is the author's too; Claude's places stay open
+  const bib = await $.tool.call({ tool: 'Write', file_path: `${ROOT}/literature/references.bib`, content: '@article{x}' })
+  expect(bib.deny).toContain('literature/references.bib belongs to the author')
+  const rules = await $.tool.call({ tool: 'Edit', file_path: 'CLAUDE.md', old_string: 'a', new_string: 'b' })
+  expect(rules.deny).toContain('CLAUDE.md belongs to the author')
+  const scope = await $.tool.call({ tool: 'Write', file_path: `${ROOT}/scope.md`, content: '# plan' })
+  expect(scope.deny).toBeUndefined()
+  const shell = await $.tool.call({ tool: 'Bash', command: 'cp notes/ai/x.md paper.json' })
+  expect(shell.deny).toContain('belongs to the author')
+  const note = await $.tool.call({ tool: 'Bash', command: 'echo x > notes/ai/x.md' })
+  expect(note.deny).toBeUndefined()
+  const elsewhere = await $.tool.call({ tool: 'Write', file_path: '/elsewhere/CLAUDE.md', content: 'x' })
+  expect(elsewhere.deny).toBeUndefined()
 })
 
 test('a manuscript change during a tool call is logged as a guard event and shown', async ($, on) => {
@@ -216,6 +285,8 @@ test('a manuscript change during a tool call is logged as a guard event and show
     if (e.tool === 'Bash' && e.command === 'python3 fix.py') {
       files.set(main, '\\section{Intro}\nRewritten by a script the patterns could not see.')
       mtimes.set(main, 2)
+      mtimes.set(`${ROOT}/paper.json`, 2) // the author's other files are compared too
+      files.set(`${ROOT}/notes/ai/profile.md`, 'Claude may write here; this is not reported')
     }
     return { result: {} }
   })
@@ -229,12 +300,12 @@ test('a manuscript change during a tool call is logged as a guard event and show
   }
   for (let i = 0; i < 50 && !logOf().some(e => e.type === 'guard'); i++) await new Promise(r => setTimeout(r, 1))
   const guard = logOf().find(e => e.type === 'guard')
-  expect(guard?.type === 'guard' && guard.files).toEqual(['manuscript/main.tex'])
+  expect(guard?.type === 'guard' && guard.files).toEqual(['manuscript/main.tex', 'paper.json'])
   expect(guard?.type === 'guard' && guard.input).toBe('python3 fix.py')
 
   const stats = computeStats(logOf(), new Date())
   expect(stats.guardEvents).toBe(1)
-  expect(overrelianceNudge(stats)).toContain('manuscript/')
+  expect(overrelianceNudge(stats)).toContain('1 change to your files')
 
   // a reading tool is not compared, so the author's own edit meanwhile is not blamed on it
   files.set(main, `${files.get(main)}\nThe author typed this.`)
@@ -504,7 +575,7 @@ test('the Log tab says who said what, before you classify it', async ($, on) => 
   })
   await ui.press({ key: 'tab-log' })
   expect(await ui.find({ type: 'Text', text: /it said: Top issue: the red thread breaks/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /✓ used = taken over as suggested/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ used = as suggested/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -613,6 +684,165 @@ test('a persona at work is one progress row, and its report one line', async ($,
   })
   expect(await report.find({ type: 'Text', text: /The Terminologist reported back/ })).toBeDefined()
   await report.unmount()
+})
+
+test('an expert of the author\'s own is read from party/<id>.md', async () => {
+  expect(isCustomId('neurologist')).toBe(true)
+  expect(isCustomId('reviewer-2')).toBe(false) // the catalogue's
+  expect(isCustomId('Neuro Logist')).toBe(false)
+  const file = [
+    '---',
+    'name: The Neurologist',
+    'role: Clinical neurology: diagnostics, patient relevance',
+    'colour: "#123abc"',
+    '---',
+    'You are **The Neurologist**. You ask whether the findings matter in the clinic.',
+    'Voice: brisk. "Which patient does this help?"',
+  ].join('\n')
+  const expert = parsePersonaFile('neurologist', file)!
+  expect(expert.persona).toMatchObject({ id: 'neurologist', name: 'The Neurologist', short: 'Neurologist', category: 'content', source: 'custom' })
+  expect(expert.persona.palette.C).toBe('#123abc')
+  expect(expert.persona.sprite.length).toBe(12)
+  expect(expert.prompt.startsWith('You are **The Neurologist**.')).toBe(true)
+  expect(expert.prompt).toContain('## Ground rules')
+  expect(expert.prompt).toContain('## Output format')
+  expect(parsePersonaFile('neurologist', 'no frontmatter')).toBeNull()
+  expect(parsePersonaFile('neurologist', '---\nname: X\n---\n')).toBeNull() // no role, no body
+  expect(parsePersonaFile('reviewer-2', file)).toBeNull()
+  // the skeleton /cw:party new writes is itself a persona, so the agent exists while the author fills it in
+  const skeleton = parsePersonaFile('ontologist', personaFileSkeleton('ontologist', 'The Ontologist', 'Ontologies, OWL, reasoning'))!
+  expect(skeleton.persona.name).toBe('The Ontologist')
+  expect(skeleton.persona.role).toBe('Ontologies, OWL, reasoning')
+  expect(partyPersonas(['architect', 'nobody', 'grammar-guy']).map(p => p.id)).toEqual(['architect', 'grammar-guy'])
+  expect(DEFAULT_PARTY).not.toContain('clinician')
+  expect(DEFAULT_PARTY.length).toBe(PERSONAS.length - 1)
+})
+
+test('the party is the roster in paper.json plus the experts in party/, and /cw:party changes it', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/paper.json`, JSON.stringify({ name: 'demo', format: 'latex', language: 'en', party: ['reviewer-2', 'architect'] }))
+  files.set(
+    `${ROOT}/party/neurologist.md`,
+    '---\nname: The Neurologist\nrole: Clinical neurology\n---\nYou are **The Neurologist**.\nVoice: brisk.\n',
+  )
+  files.set(`${ROOT}/party/notes.md`, 'not a persona\n')
+  files.set(`${ROOT}/party.md`, '## everyone\nStroke unit thesis.\n\n## neurologist — The Neurologist\nNIHSS and mRS conventions.\n')
+  workspace(on, files)
+  on('agent.offer', () => ({ isOffered: true }))
+  on('command.run', (_: unknown, e: { command: string; args: string }) => ({ text: `skill ${e.command} ${e.args}` }))
+  let task = ''
+  on('agent.spawn', (_: unknown, e: { prompt: string }) => {
+    task = e.prompt
+    return { model: 'm', agentId: 'agent-11' }
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  // the expert became an agent, once, with its file as the prompt and read-only tools
+  expect(registered.map(r => r.name)).toEqual(['neurologist'])
+  expect(registered[0]!.prompt).toContain('You are **The Neurologist**.')
+  expect(registered[0]!.prompt).toContain('## Ground rules')
+  expect(registered[0]!.tools).not.toContain('Write')
+
+  // the model is offered the members only
+  const offer = (agent: string) =>
+    $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'cw', tier: 'user' } as never })
+  expect((await offer('cw:reviewer-2')).isOffered).toBe(true)
+  expect((await offer('cw:neurologist')).isOffered).toBe(true)
+  expect((await offer('cw:grammar-guy')).isOffered).toBe(false)
+  expect((await offer('Explore')).isOffered).toBe(true)
+
+  const presentation = { isFullscreen: false, columns: 100 } as never
+  const listed = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  expect(listed.text).toContain('Your review party (3)')
+  expect(listed.text).toContain('★ neurologist · The Neurologist: Clinical neurology')
+  expect(listed.text).toContain('✓ reviewer-2')
+  expect(listed.text).toContain('Not in the party:')
+  expect(listed.text).toContain('· grammar-guy')
+  expect(listed.text).toContain('Not a persona (missing name, role or text): party/notes.md')
+
+  const ui = await $.ui.mount({
+    plugin: 'cw',
+    component: 'Pane',
+    requestId: 'cowriting',
+    surface: 'terminal',
+    props: { title: 'CoWriting', isFocused: false, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: /Neurologist/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Reviewer #2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Grammar Guy/ })).toBeUndefined()
+  await ui.unmount()
+
+  // the expert is briefed like any other member
+  await $.agent.spawn({
+    tool_use_id: 'tu-11',
+    prompt: 'Review the discussion.',
+    description: 'neurology',
+    subagentType: 'cw:neurologist',
+    provider: { plugin: 'cw', tier: 'user' } as never,
+    parentModel: 'm',
+    background: true,
+    fork: false,
+  })
+  expect(task).toContain('NIHSS and mRS conventions.')
+  expect(task).toContain('Stroke unit thesis.')
+
+  const added = await $.command.run({ command: 'cw:party', args: 'add grammar-guy clinician', origin: { kind: 'composer' }, presentation })
+  expect(added.text).toBe('Grammar Guy, The Clinician joined the party.')
+  expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).party).toEqual(['reviewer-2', 'architect', 'grammar-guy', 'clinician'])
+  expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).name).toBe('demo')
+  expect((await offer('cw:grammar-guy')).isOffered).toBe(true)
+  const removed = await $.command.run({ command: 'cw:party', args: 'remove clinician', origin: { kind: 'composer' }, presentation })
+  expect(removed.text).toBe('The Clinician left the party.')
+  expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).party).toEqual(['reviewer-2', 'architect', 'grammar-guy'])
+  const unknown = await $.command.run({ command: 'cw:party', args: 'add doctor', origin: { kind: 'composer' }, presentation })
+  expect(unknown.text).toContain('Not in the catalogue: doctor')
+  const retire = await $.command.run({ command: 'cw:party', args: 'remove neurologist', origin: { kind: 'composer' }, presentation })
+  expect(retire.text).toContain('delete party/<id>.md')
+
+  // a new expert: the skeleton is written, then the skill interviews the author
+  const made = await $.command.run({ command: 'cw:party', args: 'new ontologist "The Ontologist" ontologies, OWL, reasoning', origin: { kind: 'composer' }, presentation })
+  expect(made.text).toBe('skill cw:party new ontologist "The Ontologist" ontologies, OWL, reasoning')
+  const skeleton = files.get(`${ROOT}/party/ontologist.md`)!
+  expect(skeleton).toContain('name: The Ontologist')
+  expect(skeleton).toContain('role: ontologies, OWL, reasoning')
+  const taken = await $.command.run({ command: 'cw:party', args: 'new reviewer-2', origin: { kind: 'composer' }, presentation })
+  expect(taken.text).toContain('not a free id')
+  // the skeleton counts from now on
+  const again = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  expect(again.text).toContain('★ ontologist · The Ontologist')
+  expect(registered.map(r => r.name)).toEqual(['neurologist', 'ontologist'])
+})
+
+test('typed commands that need the model hand on to their skill, checked', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/party/neurologist.md`, '---\nname: The Neurologist\nrole: Clinical neurology\n---\nYou are **The Neurologist**.\n')
+  workspace(on, files)
+  on('command.run', (_: unknown, e: { command: string; args: string }) => ({ text: `skill ${e.command} ${e.args}` }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+  const run = (command: string, args: string) => $.command.run({ command, args, origin: { kind: 'composer' }, presentation })
+
+  expect((await run('cw:summon', 'cw:neurologist discussion')).text).toBe('skill cw:summon neurologist discussion')
+  expect((await run('cw:summon', 'architect')).text).toBe('skill cw:summon architect')
+  expect((await run('cw:summon', 'doctor')).text).toContain('Unknown persona "doctor"')
+  expect((await run('cw:summon', '')).text).toContain('Your party: grammar-guy')
+  expect((await run('cw:ask', 'terminologist is "sleep architecture" usual?')).text).toBe('skill cw:ask terminologist is "sleep architecture" usual?')
+  expect((await run('cw:ask', 'terminologist')).text).toContain('Usage')
+  expect((await run('cw:brief', 'architect')).text).toBe('skill cw:brief architect — The Architect')
+  expect((await run('cw:brief', 'all')).text).toBe('skill cw:brief everyone — the whole party')
+  expect((await run('cw:brief', 'neurologist')).text).toBe('skill cw:brief neurologist — The Neurologist')
+  expect((await run('cw:scope', 'edit')).text).toBe('skill cw:scope edit')
+  expect((await run('cw:scope', 'fly')).text).toContain('Usage')
+})
+
+test('a paper.json from before rosters keeps its party: the pack\'s clinician included', async ($, on) => {
+  workspace(on, paperFiles()) // domainPack: medicine
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+  const listed = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  expect(listed.text).toContain(`Your review party (${PERSONAS.length})`)
+  expect(listed.text).toContain('✓ clinician')
+  expect(listed.text).not.toContain('Not in the party:')
 })
 
 test('the pane shows the review party on every surface', async ($, on) => {

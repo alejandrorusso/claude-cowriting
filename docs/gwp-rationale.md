@@ -12,14 +12,14 @@
 
 | Principle | Source | CoWriting feature |
 |---|---|---|
-| Only responsible natural persons are authors | DFG statement 2023; DFG Code guideline 14 (authorship) | The manuscript guard (`tool.call` hook and deny rules) refuses the writes into `manuscript/` it can recognise and logs every change it detects during a tool call as a `guard` entry, which the disclosure lists. Skills and personas give hints, not text. |
+| Only responsible natural persons are authors | DFG statement 2023; DFG Code guideline 14 (authorship) | Claude writes only in its own places (`notes/ai/`, the log, the plan, the disclosure, the author's own review experts in `party/`). The guard (`tool.call` hook, the workspace's deny rules and its Bash sandbox) refuses the writes into `manuscript/` and the author's other files it can recognise, and logs every change it detects during a tool call as a `guard` entry; the disclosure lists the manuscript ones. Skills and personas give hints, not text. |
 | Responsibility can't be delegated to AI | DFG statement 2023 | The author annotates every AI input (adopted / adapted / rejected / info). The disclosure states the author's responsibility. |
 | Disclose which models, for what purpose, to what extent | DFG statement 2023, DFG proposals page; university templates that ask for prompts | The automatic log stores model id, Claude Code and plugin versions, category, date and tools. `ailog.py disclosure` aggregates purpose, extent, use and chapters; `ailog.py prompts` writes the prompts appendix. |
 | Transparency and traceability of the research process | DFG statement 2023; DFG Code guideline 12 (documentation) | Append-only `ai-log/`, the git history of the human-written manuscript, AI notes kept separately and labelled. |
 | No plagiarism, no infringement of intellectual property | DFG statement 2023 | Integrity Guardian, "AI summary – read the original" labels, no quotes without page numbers, `[AI-TEXT]` marker for any AI wording. |
 | Correct referencing, honesty | DFG Code, general principles | No invented references: DOI verification (`verify_refs.py`), citekeys only from the user's own `.bib`, `UNVERIFIED` marking. |
 | Confidentiality of review material | DFG statement 2023 and the 2026 peer-review guideline | Role contract: no confidential review material or unpublished third-party data in prompts. |
-| Self-critical doubt | DFG Code, general principles | Reviewer #2, Statistics Nerd, Lay Reader: perspectives that question the text rather than polish it. |
+| Self-critical doubt | DFG Code, general principles | Reviewer #2, Statistics Nerd, Lay Reader, and the experts the author adds for their field (`party/<id>.md`): perspectives that question the text rather than polish it, all under the same ground rules (hints and questions, no text, nothing invented). |
 | Learning from other authors' style without copying | DFG statement 2023 (no plagiarism) | The Style Coach describes patterns of model papers (numbers and moves), quotes them only up to ~5 words with the source, and never offers sentences. Model papers are git-ignored, so they aren't redistributed. |
 | Continuous AI feedback stays transparent and assistive | DFG statement 2023 (transparency, responsibility) | Live review (`/cw:watch`) is opt-in per session. It sends only the changed paragraphs, gives at most 3 hints and no rewrites, and logs every review (origin `watch`, model id) for the disclosure. |
 | Documenting how the text came about | DFG Code guideline 12 (documentation) | Autosave commits `manuscript/` and `ai-log/` after each writing pause under the author's own git identity, unchanged, with the word delta and the new log entries in the message. The history shows the text growing by the author's hand, interleaved with the AI input that preceded each step. |
@@ -27,7 +27,7 @@
 
 ## What CoWriting can't do
 
-- It can't make an AI write into `manuscript/` impossible. A shell variable, a script file or a symlink can get past the command patterns. It refuses what it recognises, records what it detects afterwards, and the disclosure says so rather than claiming technical prevention.
+- It can't make an AI write into `manuscript/` impossible by itself. A shell variable, a script file or a symlink can get past the command patterns; the workspace's sandbox closes that for shell commands on macOS and Linux, but it is a setting the author can switch off, and native Windows runs without it. The plugin refuses what it recognises, records what it detects afterwards, and the disclosure says so rather than claiming technical prevention. A read-only mount in a container is the guarantee for those who need one.
 - It can't stop someone from copying AI chat output into the manuscript by hand. It makes that visible instead (`[AI-TEXT]` flags) and makes writing yourself the rewarded path.
 - It doesn't know your institution's rules. Adapt the generated disclosure to them.
 

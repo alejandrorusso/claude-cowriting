@@ -3,7 +3,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Count, RecentTurn, Review, ScopePoint, ScopeProgress, Snapshot, Tab, WatchState } from '../types'
-import { ACHIEVEMENTS, USE_LABELS, xpForLevel } from './core'
+import { ACHIEVEMENTS, USE_LABELS, cut, localTime, plural, xpForLevel } from './core'
 import { personaById } from './personas'
 import type { Persona } from './personas'
 import { rasterCells, svgSource } from './sprites'
@@ -30,7 +30,8 @@ type PaneProps = {
   onScopeEdit: () => void
 }
 
-const CARD = 15
+// wide enough for "Terminologist 📋" and "Lv1 · asked 0×" with a gap to the next card
+const CARD = 17
 const SVG_SIZE = 44
 const USES = ['adopted', 'adapted', 'rejected', 'info'] as const
 // One key per button while the pane holds the keyboard (/cw:pane focuses it).
@@ -106,9 +107,7 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
         ))}
         <Button key="refresh" label="↻" hotkey="r" onPress={props.onRefresh} />
       </Box>
-      <Text dimColor>
-        keys {tabs.map((t, i) => `${i + 1} ${t}`).join(' · ')} · r refresh · Esc back to prompt
-      </Text>
+      <Text dimColor>Esc back to prompt</Text>
       {props.usage.length > 0 && <Text dimColor>⏱ {props.usage.join(' · ')}</Text>}
     </Box>
   )
@@ -121,7 +120,8 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
       <Box flexDirection="column">
         {header}
         <Text>
-          {watch.isOn ? '👁 Watching your manuscript' : 'Live review is off'} <Text dimColor>· {watch.status}</Text>
+          {watch.isOn ? '👁 Watching your manuscript' : 'Live review is off'}
+          {watch.status !== 'off' && <Text dimColor> · {watch.status}</Text>}
         </Text>
         {watch.isOn && <Text dimColor>Watching: {names}</Text>}
         <Text dimColor>
@@ -152,6 +152,9 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
       .sort((a, b) => b[1] - a[1])
       .map(([c, n]) => `${c} ${n}`)
       .join(' · ')
+    // the turns waiting on a card are not listed a second time below them
+    const cards = stats.open.slice(0, 3)
+    const recent = stats.recent.filter(r => !cards.some(c => c.id === r.id))
     return (
       <Box flexDirection="column">
         {header}
@@ -161,24 +164,24 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
         </Text>
         {categories !== '' && <Text dimColor>{categories}</Text>}
         {stats.aiText > 0 && (
-          <Text color="error">⚠ {stats.aiText} answer(s) with AI-written text: disclose them.</Text>
+          <Text color="error">⚠ {plural(stats.aiText, 'answer')} with AI-written text: disclose {stats.aiText === 1 ? 'it' : 'them'}.</Text>
         )}
         {snapshot.nudge !== null && <Text color="warning">🛡 {snapshot.nudge}</Text>}
-        <Text weight="bold">Recent</Text>
-        {stats.recent.length === 0 && <Text dimColor>Nothing logged yet.</Text>}
-        {stats.recent.map(r => (
-          <Text key={`turn-${r.id}`} dimColor={!r.isOpen}>
-            {r.isOpen ? '•' : '✓'} {r.ts.slice(5, 16).replace('T', ' ')} [{r.category}]
-            {r.isAiText ? ' [AI-TEXT]' : ''} {r.preview.slice(0, Math.max(10, columns - 30))}
-          </Text>
-        ))}
-        {stats.open.length > 0 && (
+        {cards.length > 0 && (
           <Box flexDirection="column">
             <Text weight="bold">To classify: did you use it in your own text?</Text>
             <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
-            {stats.open.slice(0, 3).map((turn, i) => classifyCard($, e, turn, i === 0, props.onAnnotate, columns))}
+            {cards.map((turn, i) => classifyCard($, e, turn, i === 0, props.onAnnotate, columns))}
           </Box>
         )}
+        {recent.length > 0 && <Text weight="bold">{cards.length > 0 ? 'Earlier' : 'Recent'}</Text>}
+        {stats.recent.length === 0 && <Text dimColor>Nothing logged yet.</Text>}
+        {recent.map(r => (
+          <Text key={`turn-${r.id}`} dimColor={!r.isOpen}>
+            {r.isOpen ? '•' : '✓'} {localTime(r.ts)} [{r.category}]
+            {r.isAiText ? ' [AI-TEXT]' : ''} {cut(r.preview, Math.max(30, columns - 24))}
+          </Text>
+        ))}
       </Box>
     )
   }
@@ -199,12 +202,12 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
         {header}
         <Text weight="bold">Level {progress.level}</Text>
         <Text>
-          {bar(progress.xp - floor, progress.nextLevelXp - floor, Math.min(30, columns - 12))} {progress.xp} XP
+          {bar(progress.xp - floor, progress.nextLevelXp - floor, Math.min(30, columns - 18))} {progress.xp} / {progress.nextLevelXp} XP
         </Text>
         <Text dimColor>
           Writing {progress.writerXp} XP ({progress.ownWords} own words) · Transparency {progress.integrityXp} XP
         </Text>
-        <Text>🔥 Streak: {progress.streak} day(s)</Text>
+        <Text>🔥 Streak: {plural(progress.streak, 'day')}</Text>
         <Text weight="bold">Achievements</Text>
         {ACHIEVEMENTS.map(a => {
           const has = progress.game.achievements.includes(a.id)
@@ -226,9 +229,7 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
   return (
     <Box flexDirection="column">
       {header}
-      <Text dimColor>
-        click a name to summon · 📋 briefed for this project (party.md) · /cw:brief &lt;persona&gt; · /cw:ask &lt;persona&gt; &lt;question&gt;
-      </Text>
+      <Text dimColor>click a name to summon · 📋 briefed · /cw:party changes who is here</Text>
       {rows.map((row, i) => (
         <Box key={`row-${i}`} flexDirection="row">
           {row.map(p => {
@@ -239,14 +240,16 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
               <Box key={`card-${p.id}`} flexDirection="column" width={CARD}>
                 {sprite($, e, p)}
                 <Button key={`summon-${p.id}`} plain onPress={() => props.onSummon(p.id)}>
-                  <Text weight="bold">{p.short}</Text>
+                  <Text weight="bold">
+                    {p.short}
+                    {snapshot.briefed.includes(p.id) ? ' 📋' : ''}
+                  </Text>
                 </Button>
                 {running !== undefined ? (
                   <Text color="warning">{reviewBar(running, 8)}</Text>
                 ) : (
                   <Text dimColor>
-                    {props.isGame ? `Lv${level} · ` : ''}
-                    {consults}×{snapshot.briefed.includes(p.id) ? ' · 📋' : ''}
+                    {props.isGame ? `Lv${level} · ` : ''}asked {consults}×
                   </Text>
                 )}
               </Box>
@@ -259,6 +262,8 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
 }
 
 const pct = (n: number) => `${Math.round(n * 100)} %`
+// the Scope tab's bar labels ("≈ Overall" is the longest) and a gap before the bar
+const LABEL = 10
 
 const POINT_ICON: Record<string, string> = { covered: '✓', partial: '◐', missing: '○' }
 const pointIcon = (p: ScopePoint) => (p.isTicked ? '☑' : POINT_ICON[p.status ?? ''] ?? '·')
@@ -285,7 +290,7 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
   const partial = scope.points.filter(p => !p.isTicked && p.status === 'partial').length
   const line = (label: string, value: number, note = '') => (
     <Text key={`scope-bar-${label}`}>
-      {label.padEnd(9)}
+      {label.padEnd(LABEL)}
       {bar(value, 1, width)} {pct(value)}
       <Text dimColor>{note}</Text>
     </Text>
@@ -294,13 +299,13 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
     <Box flexDirection="column">
       {scope.goal !== '' && (
         <Text>
-          🎯 <Text dimColor>{scope.goal.replace(/\s+/g, ' ').slice(0, Math.max(30, columns * 2 - 10))}</Text>
+          🎯 <Text dimColor>{cut(scope.goal.replace(/\s+/g, ' '), Math.max(30, columns * 2 - 10))}</Text>
         </Text>
       )}
       {line('≈ Overall', scope.overall, ' estimate')}
       {line('Content', scope.content, ' points and quantities')}
       {scope.finish === null ? (
-        <Text dimColor>Finish   set the stage of each section in scope.md (outline, draft, revised, final) for an estimate</Text>
+        <Text dimColor>{'Finish'.padEnd(LABEL)}set the stage of each section in scope.md (outline, draft, revised, final) for an estimate</Text>
       ) : (
         line('Finish', scope.finish, ` stages${scope.markers > 0 ? ` · ${scope.markers} open markers` : ''}`)
       )}
@@ -320,12 +325,12 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
             Points {covered}/{scope.points.length}
             {partial > 0 ? ` (+${partial} partial)` : ''}{' '}
             <Text dimColor>
-              {scope.checkedAt === undefined ? '· not checked yet' : `· checked ${scope.checkedAt.slice(5, 16).replace('T', ' ')} UTC`}
+              {scope.checkedAt === undefined ? '· not checked yet' : `· checked ${localTime(scope.checkedAt)}`}
             </Text>
           </Text>
           {scope.points.map((p, i) => (
             <Text key={`point-${i}`} dimColor={p.isTicked || p.status === 'covered'}>
-              {pointIcon(p)} {p.text.slice(0, Math.max(20, columns - 30))}
+              {pointIcon(p)} {cut(p.text, Math.max(30, columns - 24))}
               <Text dimColor>
                 {p.where ? ` · ${p.where.replace(/^manuscript\//, '')}` : ''}
                 {p.note && !p.isTicked ? ` · ${p.note}` : ''}
@@ -339,7 +344,7 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
           <Text weight="bold">Sections</Text>
           {scope.sections.map((s, i) => (
             <Text key={`section-${i}`} dimColor={!s.isFound}>
-              {s.name.slice(0, 16).padEnd(17)}
+              {cut(s.name, 16).padEnd(17)}
               {s.target === undefined ? `${s.words} words`.padEnd(12) : `${bar(s.words, s.target, 8)} ${s.words}/${s.target}`}
               <Text dimColor>
                 {s.stage ? ` · ${s.stage}` : ''}
@@ -355,8 +360,8 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
         <Button key="scope-edit" label="Edit scope" hotkey="e" onPress={onEdit} />
       </Box>
       <Text dimColor>
-        Counted from your text without AI; points are checked by a small model on request (logged). ☑ ticked by you · ✓ covered
-        · ◐ partial · ○ missing. Overall = 70 % content + 30 % finish: an estimate.
+        Counted without AI; points are checked by a small model on request (logged). ☑ ticked by you · ✓ covered · ◐ partial
+        · ○ missing. Overall = 70 % content + 30 % finish, an estimate.
       </Text>
     </Box>
   )
@@ -368,17 +373,18 @@ const whoSaid = (turn: RecentTurn) => (turn.persona !== undefined ? personaById(
 function classifyCard($: $, e: RenderInput, turn: RecentTurn, isFirst: boolean, onAnnotate: (ref: string, use: string) => void, columns: number) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const width = Math.max(20, columns - 14)
-  const asked = turn.origin === 'agent' ? `its report on your text` : `“${turn.preview}”`
+  const asked = turn.origin === 'agent' ? `its report on your text` : `“${cut(turn.preview, width - 2)}”`
   return (
     <Box key={`classify-${turn.id}`} flexDirection="column">
       <Text>
         <Text weight="bold">{whoSaid(turn)}</Text>{' '}
         <Text dimColor>
-          · {turn.ts.slice(5, 16).replace('T', ' ')} · {turn.category}
+          · {localTime(turn.ts)} · {turn.category}
+          {isFirst ? ` · keys ${USES.map(use => USE_HOTKEY[use]).join(' ')}` : ''}
         </Text>
       </Text>
-      <Text dimColor>  you asked: {asked.slice(0, width)}</Text>
-      <Text>  it said: {(turn.answer || '(no text)').slice(0, width * 2)}</Text>
+      <Text dimColor>  you asked: {asked}</Text>
+      <Text>  it said: {cut(turn.answer || '(no text)', width * 2)}</Text>
       <Box flexDirection="row">
         {USES.map(use => (
           <Button
@@ -471,14 +477,14 @@ export function drawBand($: $, e: RenderInput, props: BandProps) {
   const open = stats.open[0]
   const message = props.snapshot.lastWasAiText
     ? 'The last answer contains AI-written text: it is logged for your disclosure.'
-    : props.snapshot.nudge ?? `${stats.unannotated} AI inputs to classify. Did you use this one in your text?`
+    : props.snapshot.nudge ?? `${plural(stats.unannotated, 'AI input')} to classify.`
   return (
     <Box flexDirection="column">
       <Text color="warning">🛡 {message}</Text>
       {open !== undefined && (
         <Text>
-          {'   '}
-          <Text weight="bold">{whoSaid(open)}:</Text> <Text dimColor>“{open.answer.slice(0, 110)}”</Text>
+          {'   '}Did you use this in your text? <Text weight="bold">{whoSaid(open)}:</Text>{' '}
+          <Text dimColor>“{cut(open.answer, 100)}”</Text>
         </Text>
       )}
       <Box flexDirection="row">

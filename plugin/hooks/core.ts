@@ -15,7 +15,7 @@ import type {
   ResponseEntry,
   Stats,
 } from '../types'
-import { PERSONAS, personaById } from './personas'
+import { PERSONAS, customPersonas, personaById } from './personas'
 import type { Persona } from './personas'
 
 // ---------------------------------------------------------------- the log
@@ -116,11 +116,26 @@ const flatten = (s: string) =>
 
 /** What the four classifications mean, in the words the buttons and the legend use. */
 export const USE_LABELS = {
-  adopted: { button: '✓ used', meaning: 'taken over as suggested' },
-  adapted: { button: '✎ changed', meaning: 'used in your own way' },
-  rejected: { button: '✗ not used', meaning: 'you decided against it' },
-  info: { button: 'ℹ info', meaning: 'it only informed you' },
+  adopted: { button: '✓ used', meaning: 'as suggested' },
+  adapted: { button: '✎ changed', meaning: 'in your own way' },
+  rejected: { button: '✗ not used', meaning: 'decided against it' },
+  info: { button: 'ℹ info', meaning: 'only informed you' },
 } as const
+
+/** "1 hint", "2 hints": no "(s)" in what the author reads. */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** Shortens to `max` characters, with an ellipsis where it cut. */
+export const cut = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`)
+
+const two = (n: number) => String(n).padStart(2, '0')
+/** An ISO timestamp on the author's local clock: "10-31 13:00", or with `timeOnly` "13:00". */
+export const localTime = (ts: string, timeOnly = false): string => {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ts.slice(5, 16).replace('T', ' ')
+  const clock = `${two(d.getHours())}:${two(d.getMinutes())}`
+  return timeOnly ? clock : `${two(d.getMonth() + 1)}-${two(d.getDate())} ${clock}`
+}
 
 export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => {
   const prompts = new Map<string, PromptEntry>()
@@ -187,13 +202,22 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
 
 // -------------------------------------------------------------- the guard
 //
-// Three layers, each honest about its reach:
-// 1. File tools (Write, Edit, …) are refused by path: `..` is resolved, case is ignored.
+// Inside a paper, Claude writes only in its own places (`CLAUDE_WRITES`); every other file is
+// the author's. Three layers, each honest about its reach:
+// 1. File tools (Write, Edit, …) are refused by path: `..` is resolved, case is ignored. A
+//    `manuscript` folder is refused anywhere, the rest of the author's files inside the paper.
 // 2. Shell commands are refused by pattern. This is a best effort: a variable, a script file or
-//    a symlink can get past it, and the README says so.
-// 3. After any other tool ran, the manuscript's files are compared with how they were before.
+//    a symlink can get past it, and the README says so. The workspace's settings add the OS
+//    sandbox for what the patterns cannot see.
+// 3. After any other tool ran, the author's files are compared with how they were before.
 //    A change is logged as a `guard` entry (see `changedFiles`), shown to the author, and listed
 //    in the disclosure. What layer 2 misses, layer 3 records.
+
+/** Where Claude may write inside a paper, relative to its root: folders and single files. */
+export const CLAUDE_WRITES = {
+  folders: ['notes/ai', 'ai-log', 'disclosure', 'party', '.cowriting', 'build'],
+  files: ['scope.md'],
+} as const
 
 const WRITE_PATTERNS = [
   /\btee\b/,
@@ -230,28 +254,73 @@ const segmentsOf = (path: string): string[] => {
 export const isManuscriptPath = (path: string): boolean =>
   segmentsOf(path).some(s => (/[*?]/.test(s) ? globToRegExp(s).test('manuscript') : s.toLowerCase() === 'manuscript'))
 
+/** Is this relative path (segments, case as written) one of Claude's places? A glob never is. */
+const isClaudesPlace = (rel: readonly string[]): boolean => {
+  if (rel.some(s => /[*?]/.test(s))) return false
+  const lower = rel.map(s => s.toLowerCase())
+  if (lower.length === 1 && CLAUDE_WRITES.files.some(f => f === lower[0])) return true
+  return CLAUDE_WRITES.folders.some(folder => {
+    const parts = folder.split('/')
+    return lower.length > parts.length && parts.every((p, i) => p === lower[i])
+  })
+}
+
+/** Is a name at the paper's root wholly the author's? `notes` is not: `notes/ai` is Claude's. */
+export const isAuthorsName = (name: string): boolean => {
+  const lower = name.toLowerCase()
+  return !CLAUDE_WRITES.files.some(f => f === lower) && !CLAUDE_WRITES.folders.some(f => f === lower || f.startsWith(`${lower}/`))
+}
+
+/** A path relative to the session's folder made absolute; one the shell will expand is left alone. */
+export const absolutePath = (cwd: string, path: string): string =>
+  path.startsWith('/') || path.startsWith('~') || path.startsWith('$') ? path : `${cwd}/${path}`
+
 /**
- * Would this shell command change a file in a `manuscript` folder, as far as its text shows?
- * A redirect into the folder, a `cd` into it followed by any redirect or write, or a writing
- * command with the folder among its words. A variable or a script hiding the path gets past this;
- * the after-the-fact comparison (`changedFiles`) is for those.
+ * The author's file this path names, relative to the paper's root, or null when the path lies
+ * outside the paper or in one of Claude's places. `..` is resolved and case ignored.
  */
-export const bashTouchesManuscript = (command: string): boolean => {
+export const authorFileOf = (path: string, root: string): string | null => {
+  const base = segmentsOf(root)
+  const segs = segmentsOf(path)
+  if (segs.length <= base.length || base.some((s, i) => s.toLowerCase() !== segs[i]!.toLowerCase())) return null
+  const rel = segs.slice(base.length)
+  return isClaudesPlace(rel) ? null : rel.join('/')
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Would this shell command change a file `isTarget` recognises, as far as its text shows?
+ * A redirect into it, a `cd` into it followed by any redirect or write, or a writing command
+ * with one of `names` among its words as a path (`manuscript/`, `"manuscript"`, …; not inside a
+ * longer word or a search pattern). A variable or a script hiding the path gets past this; the
+ * after-the-fact comparison (`changedFiles`) is for those.
+ */
+export const bashWritesTo = (command: string, isTarget: (path: string) => boolean, names: readonly string[]): boolean => {
   const targets = [...command.matchAll(REDIRECT)].map(m => m[1]!)
-  if (targets.some(isManuscriptPath)) return true
-  const entersManuscript = [...command.matchAll(CD)].some(m => isManuscriptPath(m[1]!))
+  if (targets.some(isTarget)) return true
+  const enters = [...command.matchAll(CD)].some(m => isTarget(m[1]!))
   const writes = WRITE_PATTERNS.some(p => p.test(command))
-  if (entersManuscript && (writes || targets.some(t => !t.startsWith('/dev/')))) return true
-  const mentions = /(^|[^a-z0-9_-])manuscript([^a-z0-9_-]|$)/i.test(command)
+  if (enters && (writes || targets.some(t => !t.startsWith('/dev/')))) return true
+  const mentions = names.some(n => new RegExp(`(^|[\\s'"=(/])${escapeRegExp(n)}(/|[\\s'")]|$)`, 'i').test(command))
   return mentions && writes
 }
+
+/** Would this shell command change a file in a `manuscript` folder, wherever the paper is? */
+export const bashTouchesManuscript = (command: string): boolean => bashWritesTo(command, isManuscriptPath, ['manuscript'])
 
 export const GUARD_MESSAGE =
   'CoWriting: the manuscript/ folder is written by its human author only (DFG good scientific practice: ' +
   'only natural persons are authors). Give located feedback, questions or corrected example sentences in the chat instead; ' +
   'the author decides what goes into the text.'
 
-/** Manuscript files by relative path → `mtime:size`, as they were at one moment. */
+/** The refusal for any other file of the author's: it names the file and where Claude may write. */
+export const authorGuardMessage = (file: string): string =>
+  `CoWriting: ${file} belongs to the author of this paper and is not changed by Claude. ` +
+  `Claude writes only in ${CLAUDE_WRITES.folders.filter(f => f !== 'build' && f !== '.cowriting').map(f => `${f}/`).join(', ')} ` +
+  `and ${CLAUDE_WRITES.files.join(', ')}; ask the author to make the change themselves.`
+
+/** The author's files by relative path → `mtime:size`, as they were at one moment. */
 export type Fingerprint = Readonly<Record<string, string>>
 
 /** The files that differ between two fingerprints: changed, added or removed. */
@@ -363,7 +432,7 @@ export const advanceGame = (
   const streak = streakOf(game.writingDays, today)
 
   const personaLevels: Record<string, number> = {}
-  for (const p of PERSONAS) personaLevels[p.id] = levelFor((stats.personaAdopted[p.id] ?? 0) * 25)
+  for (const p of [...PERSONAS, ...customPersonas()]) personaLevels[p.id] = levelFor((stats.personaAdopted[p.id] ?? 0) * 25)
 
   const earned: Record<string, boolean> = {
     'first-1000': ownWords >= 1000,
@@ -396,7 +465,7 @@ export const advanceGame = (
 /** A gentle nudge when the help starts to outweigh the writing. */
 export const overrelianceNudge = (stats: Stats): string | undefined => {
   if (stats.guardEvents > 0) {
-    return `${stats.guardEvents} change(s) to manuscript/ happened during AI tool calls. Check the git history; what you keep must be disclosed.`
+    return `${plural(stats.guardEvents, 'change')} to your files happened during AI tool calls. Check the git history; what you keep in the manuscript must be disclosed.`
   }
   if (stats.aiText >= 3) {
     return `${stats.aiText} answers contained AI-written text. Disclose them, and try writing the next passage yourself first.`

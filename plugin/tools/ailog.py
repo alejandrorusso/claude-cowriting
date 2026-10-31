@@ -124,8 +124,13 @@ def turns(entries: list[dict]) -> list[dict]:
 
 
 def guard_events(entries: list[dict]) -> list[dict]:
-    """Manuscript changes the plugin detected during AI tool calls."""
+    """Changes to the author's files the plugin detected during AI tool calls."""
     return [e for e in entries if e.get("type") == "guard"]
+
+
+def manuscript_files(event: dict) -> list[str]:
+    """The manuscript files among a guard event's files: what the disclosure must list."""
+    return [f for f in event.get("files", []) if f.lower().startswith("manuscript/")]
 
 
 def append(root: Path, entry: dict) -> None:
@@ -178,7 +183,9 @@ def cmd_stats(root: Path, args) -> None:
     open_count = sum(1 for t in ts if t["is_open"])
     ai_text = sum(1 for t in ts if t["response"].get("ai_text_flag"))
     guards = guard_events(entries)
-    print(f"Turns: {len(ts)}  unannotated: {open_count}  [AI-TEXT]: {ai_text}  manuscript changes during AI tool calls: {len(guards)}")
+    in_manuscript = sum(1 for g in guards if manuscript_files(g))
+    print(f"Turns: {len(ts)}  unannotated: {open_count}  [AI-TEXT]: {ai_text}  "
+          f"changes to your files during AI tool calls: {len(guards)} (in the manuscript: {in_manuscript})")
     for cat, n in by_cat.most_common():
         print(f"  {cat:<12} {n}")
     for g in guards:
@@ -295,7 +302,8 @@ def cmd_disclosure(root: Path, args) -> None:
         if de else
         "The author bears full responsibility for content, sources and wording. Adapt this statement to the target institution's rules."
     )
-    guard_lines = [f"{g['ts'][:10]}: {g.get('tool', '?')} – {', '.join(g.get('files', []))}" for g in guards]
+    # only the manuscript is declared; a changed bibliography or setting is in the log, not the register
+    guard_lines = [f"{g['ts'][:10]}: {g.get('tool', '?')} – {', '.join(manuscript_files(g))}" for g in guards if manuscript_files(g)]
 
     if fmt == "md":
         out = [f"# {title}", "", intro, "", "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]

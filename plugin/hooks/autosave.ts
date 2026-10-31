@@ -50,11 +50,11 @@ async function wordsAt($: $, paper: Paper, top: string, path: string): Promise<F
 }
 
 /** One look at the manuscript and the AI log; resolves the commit's title when it committed. */
-export async function autosaveTick($: $, pack: string): Promise<string | null> {
+export async function autosaveTick($: $): Promise<string | null> {
   if (isBusy) return null
   isBusy = true
   try {
-    const paper = await findPaper($, pack)
+    const paper = await findPaper($)
     if (paper === null || !paper.autosave) return null
     // folder by folder: a folder git cannot see (missing, or empty) would fail the commit
     const changed: string[] = []

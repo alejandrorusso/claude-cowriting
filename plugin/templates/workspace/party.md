@@ -4,7 +4,9 @@
      Whenever a persona reviews (summoned, asked, or in live review), the plugin hands it
      the "everyone" section and its own section. Empty sections are skipped.
      Edit it any time, or let a persona interview you: /cw:brief <persona>.
-     Set a brief in one line: /cw:brief <persona> <what to look for>. -->
+     Set a brief in one line: /cw:brief <persona> <what to look for>.
+     Sections of personas outside your party are ignored; an expert of your own (party/<id>.md)
+     gets its section when you brief it. -->
 
 ## everyone — the whole party
 <!-- Field and subfield, kind of text (thesis, article, report), target journal or examiner, audience, style guide (e.g. APA 7, Vancouver), US or British English, what stage the draft is in. -->
@@ -37,4 +39,4 @@
 <!-- e.g. the nomenclature that applies (MeSH, ICD-11, ISO …), terms you use on purpose, glossary decisions. -->
 
 ## clinician — The Clinician
-<!-- medicine pack: e.g. clinical setting, patient group, guidelines that apply. -->
+<!-- e.g. clinical setting, patient group, guidelines that apply. -->

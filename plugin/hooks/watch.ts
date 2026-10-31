@@ -7,9 +7,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { LiveHint, Paper, WatchState } from '../types'
-import { changedParagraphs, newId, parseHints, watchExcerpt, watchSystem } from './core'
+import { changedParagraphs, localTime, newId, parseHints, plural, watchExcerpt, watchSystem } from './core'
 import type { Paragraph } from './core'
-import { activePersonas, personaById } from './personas'
+import { partyPersonas, personaById } from './personas'
 import { appendLog, findPaper, readBriefs } from './workspace'
 
 type $ = EngineInterface
@@ -69,10 +69,10 @@ async function setStatus($: $, status: string): Promise<void> {
 }
 
 /** One look at the manuscript; resolves true when a review ran and was logged. */
-export async function watchTick($: $, pack: string, model: string): Promise<boolean> {
+export async function watchTick($: $, model: string): Promise<boolean> {
   const state = await read($, watchAtom)
   if (!state.isOn || seen.isBusy) return false
-  const paper = await findPaper($, pack)
+  const paper = await findPaper($)
   if (paper === null) return false
   const now = await $.clock.now()
 
@@ -120,7 +120,7 @@ async function review($: $, paper: Paper, state: WatchState, model: string, now:
   seen.dirty.clear()
   if (parts.length === 0) return false
 
-  const active = activePersonas(paper.domainPack)
+  const active = partyPersonas(paper.party)
   const personas = state.personas.flatMap(id => active.filter(p => p.id === id))
   if (personas.length === 0) return false
   const profilePath = join(paper.root, 'notes', 'ai', 'style-profile.md')
@@ -174,11 +174,11 @@ async function review($: $, paper: Paper, state: WatchState, model: string, now:
   const fileFor = (line: number) =>
     parts.find(p => p.changed.some(c => line >= c.start && line <= c.end))?.file ?? parts[0]!.file
   const fresh: LiveHint[] = hints.map(h => ({ ref: id, persona: h.persona, file: fileFor(h.line), line: h.line, text: h.hint, ts }))
-  const clock = ts.slice(11, 16)
+  const clock = localTime(ts, true)
   await update($, watchAtom, s => ({
     ...s,
     hints: [...fresh, ...s.hints].slice(0, KEEP_HINTS),
-    status: hints.length > 0 ? `${hints.length} hint(s) at ${clock} UTC` : `looked at ${clock} UTC: nothing to add, keep writing`,
+    status: hints.length > 0 ? `${plural(hints.length, 'hint')} at ${clock}` : `looked at ${clock}: nothing to add, keep writing`,
     isHidden: hints.length === 0 ? s.isHidden : false,
   }))
   return true

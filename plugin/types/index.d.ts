@@ -47,7 +47,8 @@ export type AnnotationEntry = {
 }
 
 /**
- * A change to manuscript files that happened while one of Claude's tool calls ran. The guard
+ * A change to the author's files (the manuscript, the literature, the plan's settings: anything
+ * in the paper that is not Claude's) that happened while one of Claude's tool calls ran. The guard
  * refuses the writes it can recognise; this records every change it could not prevent, so the
  * git history and the disclosure can account for it.
  */
@@ -133,7 +134,8 @@ export type Paper = {
   name: string
   format: 'latex' | 'markdown'
   language: 'en' | 'de'
-  domainPack: string
+  /** the review party's members: catalogue ids from paper.json plus the paper's party/<id>.md experts */
+  party: string[]
   /** false in paper.json: this paper is never autosaved (e.g. a demo inside another repository) */
   autosave: boolean
 }

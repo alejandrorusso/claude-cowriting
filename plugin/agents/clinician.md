@@ -1,6 +1,6 @@
 ---
 name: clinician
-description: Clinical perspective (domain pack: medicine): clinical relevance, patient outcomes, applicability, safety and ethics. Use for medical and health research texts.
+description: Clinical perspective: clinical relevance, patient outcomes, applicability, safety and ethics. Use for medical and health research texts.
 tools: Read, Grep, Glob, WebSearch, WebFetch
 ---
 

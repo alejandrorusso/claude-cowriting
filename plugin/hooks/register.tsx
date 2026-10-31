@@ -12,8 +12,12 @@ import {
   usageShort,
   GUARD_MESSAGE,
   READ_ONLY_TOOLS,
+  absolutePath,
   advanceGame,
+  authorFileOf,
+  authorGuardMessage,
   bashTouchesManuscript,
+  bashWritesTo,
   briefFor,
   categoryFor,
   changedFiles,
@@ -26,16 +30,18 @@ import {
   overrelianceNudge,
   personaForAgent,
 } from './core'
-import { activePersonas, personaById } from './personas'
+import { PERSONAS, customPersonas, isCustomId, partyPersonas, personaById, personaFileSkeleton } from './personas'
 import { drawBand, drawLiveBand, drawPane, drawReviewRow, drawToolLine, drawWaiting } from './ui'
 import { AUTOSAVE_TICK_MS, autosaveTick } from './autosave'
 import { SCOPE_FILE, checkPoints, measureScope } from './scope'
 import { IDLE_WATCH, PAUSE_MS, TICK_MS, resetWatchBaseline, watchTick } from './watch'
 import {
   appendLog,
+  authorNames,
   describePapers,
   findPaper,
-  fingerprintManuscript,
+  fingerprintAuthorFiles,
+  loadParty,
   manuscriptWords,
   readGame,
   readLog,
@@ -47,6 +53,7 @@ import {
   withLog,
   writeBrief,
   writeGame,
+  writeParty,
 } from './workspace'
 
 type $ = EngineInterface
@@ -88,6 +95,8 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
     paper.root !== cwd ? elsewhereText(paper.root) : '',
     'The human is the sole author (DFG good scientific practice). You assist; you never ghostwrite.',
     '- Never write or rewrite prose meant for the manuscript (no paragraphs, rephrasings, abstracts, introductions). Files under manuscript/ are read-only for you.',
+    '- Inside the paper you write only in notes/ai/, scope.md, disclosure/, party/ (the author\'s own review experts, at their request) and the log. Every other file (manuscript/, literature/, CLAUDE.md, party.md, paper.json, settings) is the author\'s: ask them to change it.',
+    `- The review party of this paper: ${partyPersonas(paper.party).map(p => `cw:${p.id} (${p.name})`).join(', ') || 'nobody yet'}. /cw:party changes it; a party/<id>.md file is an expert of the author's own.`,
     '- Give located feedback (file:line), Socratic questions, structure and argument critique, explanations, literature help, checklists and overviews.',
     '- Language exception: for grammar, spelling and punctuation you may show the corrected sentence together with the rule. No stylistic rewrites.',
     `- If the author explicitly insists on text written by you, start that text with ${AI_TEXT_MARKER} and remind them it must be disclosed.`,
@@ -104,7 +113,6 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
     .join('\n')
 
 type Config = {
-  pack: string
   vault: string
   notesFolder: string
   isGame: boolean
@@ -123,12 +131,15 @@ let watchTimer: { cancel: () => void } | null = null
 let autosaveTimer: { cancel: () => void } | null = null
 
 async function refresh($: $, cfg: Config, isTurnEnd = false, lastWasAiText = false): Promise<Snapshot> {
-  const paper = await findPaper($, cfg.pack)
-  if (paper === null) {
+  const found = await findPaper($)
+  if (found === null) {
     await update($, snapshotAtom, () => EMPTY_SNAPSHOT)
     $.ui.status(undefined)
     return EMPTY_SNAPSHOT
   }
+  // the paper's own experts join its party once they are loaded
+  await loadParty($, found.root).catch(() => [])
+  const paper = (await findPaper($)) ?? found
   const stats = computeStats(await readLog($, paper.root), new Date())
   let progress = null
   if (cfg.isGame) {
@@ -193,7 +204,7 @@ async function annotate($: $, cfg: Config, ref: string, use: string): Promise<vo
   await refresh($, cfg)
 }
 
-/** A manuscript change during a tool call: logged, shown, and from then on in the disclosure. */
+/** A change to the author's files during a tool call: logged, shown, and from then on in the disclosure. */
 async function reportGuard($: $, cfg: Config, paper: Paper, tool: string, input: string, files: string[]): Promise<void> {
   await appendLog($, paper.root, {
     type: 'guard',
@@ -205,7 +216,7 @@ async function reportGuard($: $, cfg: Config, paper: Paper, tool: string, input:
     input,
     files,
   }).catch(() => undefined)
-  $.ui.toast(`⚠ manuscript/ changed while ${tool} ran: ${files.join(', ')}. Logged; check git diff.`)
+  $.ui.toast(`⚠ ${files.join(', ')} changed while ${tool} ran. Logged; check git diff.`)
   await update($, bandHiddenAtom, () => false)
   await refresh($, cfg).catch(() => undefined)
 }
@@ -230,7 +241,7 @@ async function readVersions($: $): Promise<{ plugin?: string; claude_code?: stri
  * persona launched by it is counted.
  */
 async function submitAsAuthor($: $, cfg: Config, text: string, category: string, command: string): Promise<void> {
-  const paper = await findPaper($, cfg.pack)
+  const paper = await findPaper($)
   if (paper !== null) {
     const id = newId()
     turn = { id, personas: new Set(), tools: new Set(), agents: {} }
@@ -245,7 +256,7 @@ async function submitAsAuthor($: $, cfg: Config, text: string, category: string,
       text,
     }).catch(() => undefined)
   }
-  await $.prompt.submit({ text })
+  void $.prompt.submit({ text })
 }
 
 async function summon($: $, cfg: Config, personaId: string, target: string): Promise<string> {
@@ -261,6 +272,55 @@ async function summon($: $, cfg: Config, personaId: string, target: string): Pro
 
 const KEEP_REVIEWS = 20
 
+/** /cw:party: who is in this paper's party, and the changes to it; `{ args }` hands a new expert to the skill's interview. */
+async function partyCommand($: $, cfg: Config, paper: Paper, verb: string, words: string[]): Promise<string | { args: string }> {
+  const broken = await loadParty($, paper.root).catch(() => [])
+  const party = (await findPaper($))?.party ?? paper.party
+  const members = partyPersonas(party)
+  const catalog = party.filter(id => PERSONAS.some(p => p.id === id))
+  if (verb === '' || verb === 'list') {
+    const line = (p: { id: string; name: string; role: string; source: string }) =>
+      `${p.source === 'custom' ? '★' : '✓'} ${p.id} · ${p.name}: ${p.role}`
+    const bench = PERSONAS.filter(p => !party.includes(p.id))
+    return [
+      `Your review party (${members.length}): ★ your own experts (party/<id>.md)`,
+      ...members.map(line),
+      ...(bench.length > 0 ? ['Not in the party:', ...bench.map(p => `· ${p.id} · ${p.name}: ${p.role}`)] : []),
+      ...(broken.length > 0 ? [`Not a persona (missing name, role or text): ${broken.map(id => `party/${id}.md`).join(', ')}`] : []),
+      '/cw:party add|remove <id …> · /cw:party new <id> "<Name>" <role…> makes an expert of your own',
+    ].join('\n')
+  }
+  if (verb === 'add' || verb === 'remove') {
+    if (words.length === 0) return `Usage: /cw:party ${verb} <id …>`
+    const unknown = words.filter(w => !PERSONAS.some(p => p.id === w))
+    const own = unknown.filter(w => customPersonas().some(p => p.id === w))
+    if (own.length > 0 && verb === 'remove') return `${own.join(', ')}: your own experts are their files; delete party/<id>.md to retire one.`
+    if (unknown.length > 0) return `Not in the catalogue: ${unknown.join(', ')}. It has: ${PERSONAS.map(p => p.id).join(', ')}.`
+    const next = verb === 'add' ? [...catalog, ...words.filter(w => !catalog.includes(w))] : catalog.filter(id => !words.includes(id))
+    await writeParty($, paper.root, next)
+    await refresh($, cfg)
+    const names = words.map(w => personaById(w)?.name ?? w).join(', ')
+    return verb === 'add' ? `${names} joined the party.` : `${names} left the party.`
+  }
+  if (verb === 'new') {
+    const [id = '', ...rest] = words
+    if (!isCustomId(id)) {
+      return id === ''
+        ? 'Usage: /cw:party new <id> "<Name>" <role…>, e.g. /cw:party new neurologist "The Neurologist" clinical neurology, diagnostics'
+        : `"${id}" is not a free id: lowercase letters, digits and dashes, and not a catalogue persona's.`
+    }
+    const quoted = /^"([^"]+)"\s*(.*)$/.exec(rest.join(' '))
+    const name = quoted?.[1] ?? rest.join(' ')
+    const role = quoted?.[2]?.trim() ?? ''
+    const file = `${paper.root}/party/${id}.md`
+    if (await $.fs.exists(file)) return `party/${id}.md exists already; edit it, or /cw:brief ${id} to tell them what to look for.`
+    await $.fs.write(file, personaFileSkeleton(id, name || id, role || '(what this expert looks at)'))
+    await loadParty($, paper.root).catch(() => [])
+    return { args: `new ${id} "${name || id}" ${role}`.trim() }
+  }
+  return 'Usage: /cw:party [add|remove <id …> | new <id> "<Name>" <role…>]'
+}
+
 /** A step of a persona at work: what the progress row and the party card show. */
 const SCOPE_INTERVIEW =
   `Help me set the scope of this paper in ${SCOPE_FILE}. Interview me, one question at a time: the goal (what should a reader ` +
@@ -270,7 +330,7 @@ const SCOPE_INTERVIEW =
   'keeping its comment lines. Do not add points of your own; you may ask whether something is missing. Show me the result.'
 
 async function scopeCommand($: $, cfg: Config, verb: string): Promise<string> {
-  const paper = await findPaper($, cfg.pack)
+  const paper = await findPaper($)
   if (paper === null) return 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.'
   if (verb === 'check') {
     $.ui.toast('🎯 Checking your points…')
@@ -312,12 +372,12 @@ const stepLabel = (tool: string, input: Record<string, unknown>) => {
 }
 
 async function watchStep($: $, cfg: Config): Promise<void> {
-  const reviewed = await watchTick($, cfg.pack, cfg.watchModel).catch(() => false)
+  const reviewed = await watchTick($, cfg.watchModel).catch(() => false)
   if (reviewed) await refresh($, cfg)
 }
 
 async function autosaveStep($: $, cfg: Config): Promise<void> {
-  const saved = await autosaveTick($, cfg.pack).catch(() => null)
+  const saved = await autosaveTick($).catch(() => null)
   if (saved === null) return
   if ((await focusMode($, cfg)) !== 'focus') $.ui.toast(`💾 ${saved}`)
   await refresh($, cfg).catch(() => undefined)
@@ -335,10 +395,12 @@ async function setWatching($: $, cfg: Config, isOn: boolean, personas?: string[]
     watchTimer?.cancel()
     watchTimer = null
   }
+  const party = (await findPaper($))?.party ?? []
+  const kept = (ids: readonly string[]) => ids.filter(id => party.includes(id))
   await update($, watchAtom, s => ({
     ...s,
     isOn,
-    personas: personas ?? (s.personas.length > 0 ? s.personas : [...WATCH_DEFAULT]),
+    personas: personas ?? (kept(s.personas).length > 0 ? kept(s.personas) : kept([...WATCH_DEFAULT])),
     status: isOn ? `watching: pause for ${PAUSE_MS / 1000} s after writing to get hints` : 'off',
   }))
   await refresh($, cfg)
@@ -351,7 +413,6 @@ function commandFailed() {
 
 export const register: Register = (on, options) => {
   const cfg: Config = {
-    pack: String(options.domainPack ?? 'none'),
     vault: String(options.obsidianVault ?? ''),
     notesFolder: String(options.aiNotesFolder ?? 'AI-Notes'),
     isGame: options.game !== false,
@@ -360,7 +421,7 @@ export const register: Register = (on, options) => {
     meter: options.usageMeter === 'off' || options.usageMeter === 'tokens' ? options.usageMeter : 'tokens+limits',
     isAutosave: options.autosave !== false,
   }
-  const { pack, vault, notesFolder, isGame } = cfg
+  const { vault, notesFolder, isGame } = cfg
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -375,9 +436,15 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('command.run', { command: 'cw:scope' }, async ($, e) => {
+  // A typed command cannot submit a prompt from its hook (the engine holds that turn), so the
+  // commands that need the model hand on to their skill's text; the pane's buttons submit directly.
+  on('command.run', { command: 'cw:scope' }, async ($, e, next) => {
     const verb = e.args.trim().toLowerCase()
     if (!['', 'check', 'edit', 'setup'].includes(verb)) return { text: 'Usage: /cw:scope [check|edit]' }
+    if (verb === 'edit' || verb === 'setup') {
+      if ((await findPaper($)) === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+      return next({ ...e, args: 'edit' })
+    }
     return { text: await scopeCommand($, cfg, verb) }
   }).catch(commandFailed)
 
@@ -393,7 +460,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'cw:paper' }, async ($, e) => {
     const arg = e.args.trim()
-    if (arg === '') return { text: await describePapers($, pack) }
+    if (arg === '') return { text: await describePapers($) }
     const text = await openPaper($, arg)
     await refresh($, cfg)
     return { text }
@@ -407,7 +474,8 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
   on('command.run', { command: 'cw:watch' }, async ($, e) => {
-    if ((await findPaper($, pack)) === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+    const paper = await findPaper($)
+    if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const state = await read($, watchAtom)
     const verb = words[0] === 'on' || words[0] === 'off' ? words.shift()! : words.length > 0 ? 'on' : state.isOn ? 'off' : 'on'
@@ -415,7 +483,7 @@ export const register: Register = (on, options) => {
       await setWatching($, cfg, false)
       return { text: 'Live review stopped.' }
     }
-    const active = activePersonas((await read($, snapshotAtom)).paper?.domainPack ?? pack)
+    const active = partyPersonas(paper.party)
     let personas: string[] | undefined
     if (words.includes('all')) personas = active.map(p => p.id)
     else if (words.length > 0) {
@@ -430,11 +498,11 @@ export const register: Register = (on, options) => {
     return { text: `👁 Live review on · ${names} · hints show above the prompt when you pause · /cw:watch off` }
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:brief' }, async ($, e) => {
-    const paper = await findPaper($, pack)
+  on('command.run', { command: 'cw:brief' }, async ($, e, next) => {
+    const paper = await findPaper($)
     if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
     const [who = '', ...rest] = e.args.trim().split(/\s+/)
-    const active = activePersonas(paper.domainPack)
+    const active = partyPersonas(paper.party)
     if (who === '') {
       const briefs = await readBriefs($, paper.root)
       const line = (key: string, label: string) => `${briefs[key] ? '📋' : '·'} ${label}${briefs[key] ? `: ${briefs[key]!.split('\n')[0]!.slice(0, 60)}` : ''}`
@@ -459,34 +527,24 @@ export const register: Register = (on, options) => {
       await refresh($, cfg)
       return { text: `📋 Brief for ${name} saved in party.md.` }
     }
-    const heading = key === 'everyone' ? 'everyone — the whole party' : `${persona!.id} — ${persona!.name}`
-    const voice = persona ? `Speak as ${persona.name}, from the perspective of the cw:${persona.id} agent.` : 'Speak for the whole review party.'
-    await submitAsAuthor(
-      $,
-      cfg,
-      `Brief ${name} for this paper. ${voice} Interview me about what ${persona ? 'you' : 'the party'} should look for in this project: ` +
-        'one question at a time, 3 to 5 questions (field and its conventions, target journal or examiner, audience, known weak spots, what to ignore). ' +
-        `Then write my answers as a short bullet list into the "## ${heading}" section of party.md: replace only that section's text, keep its comment line and all other sections, and use my words. Show me the result.`,
-      'meta',
-      'briefing',
-    )
-    return { text: `📋 ${persona ? persona.name : 'The party'} interviews you…` }
+    // the interview: the skill's text, with the section heading as its argument
+    return next({ ...e, args: key === 'everyone' ? 'everyone — the whole party' : `${persona!.id} — ${persona!.name}` })
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:ask' }, async ($, e) => {
+  on('command.run', { command: 'cw:party' }, async ($, e, next) => {
+    const paper = await findPaper($)
+    if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+    const [verb = '', ...words] = e.args.trim().split(/\s+/).filter(Boolean)
+    const answer = await partyCommand($, cfg, paper, verb.toLowerCase(), words)
+    return typeof answer === 'string' ? { text: answer } : next({ ...e, args: answer.args })
+  }).catch(commandFailed)
+
+  on('command.run', { command: 'cw:ask' }, async ($, e, next) => {
     const [who = '', ...rest] = e.args.trim().split(/\s+/)
     const persona = personaById(who)
     const question = rest.join(' ').trim()
     if (persona === undefined || question === '') return { text: 'Usage: /cw:ask <persona> <question>' }
-    await submitAsAuthor(
-      $,
-      cfg,
-      `Use the cw:${persona.id} agent to answer my question: "${question}". It may read my manuscript, notes and party.md. ` +
-        'Relay its answer as given; do not add rewritten text.',
-      persona.category,
-      'ask',
-    )
-    return { text: `🗨 ${persona.name} is thinking…` }
+    return next({ ...e, args: `${persona.id} ${question}` })
   }).catch(commandFailed)
 
   on('command.run', { command: 'cw:quiet' }, async ($, e) => {
@@ -509,19 +567,21 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('command.run', { command: 'cw:summon' }, async ($, e) => {
+  on('command.run', { command: 'cw:summon' }, async ($, e, next) => {
     const [id = '', ...rest] = e.args.trim().split(/\s+/)
-    if (id === '') {
-      const names = activePersonas(pack).map(p => p.id).join(', ')
-      return { text: `Usage: /cw:summon <persona> [file]. Personas: ${names}` }
+    const party = partyPersonas((await findPaper($))?.party ?? [])
+    const persona = personaById(id)
+    if (id === '' || persona === undefined) {
+      const names = party.map(p => p.id).join(', ')
+      return { text: `${id === '' ? '' : `Unknown persona "${id}". `}Usage: /cw:summon <persona> [file]. Your party: ${names}` }
     }
-    return { text: await summon($, cfg, id, rest.join(' ')) }
+    return next({ ...e, args: `${persona.id} ${rest.join(' ')}`.trim() })
   }).catch(commandFailed)
 
   on('prompt.compose', async ($, e, next) => {
     model = e.model
     const result = await next(e)
-    const paper = await findPaper($, pack)
+    const paper = await findPaper($)
     if (paper === null) return result
     return {
       sections: [
@@ -533,7 +593,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     const result = await next(e)
-    const paper = await findPaper($, pack)
+    const paper = await findPaper($)
     if (paper === null) return result
     const id = newId()
     turn = { id, personas: new Set(), tools: new Set(), agents: {} }
@@ -565,9 +625,30 @@ export const register: Register = (on, options) => {
     const tool = String(e.tool)
     const input = e as unknown as Record<string, unknown>
     const path = String(input.file_path ?? input.notebook_path ?? '')
+    const command = String(input.command ?? '')
     const isFileWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)
+    // a manuscript folder is refused wherever it is, paper or not
     if (isFileWrite && isManuscriptPath(path)) return { deny: GUARD_MESSAGE }
-    if (tool === 'Bash' && bashTouchesManuscript(String(input.command ?? ''))) return { deny: GUARD_MESSAGE }
+    if (tool === 'Bash' && bashTouchesManuscript(command)) return { deny: GUARD_MESSAGE }
+    // inside the paper, everything but Claude's own places is the author's
+    const paper = READ_ONLY_TOOLS.has(tool) ? null : await findPaper($).catch(() => null)
+    if (paper !== null && (isFileWrite || tool === 'Bash')) {
+      const cwd = await $.session.cwd()
+      if (isFileWrite) {
+        const file = authorFileOf(absolutePath(cwd, path), paper.root)
+        if (file !== null) return { deny: authorGuardMessage(file) }
+      } else {
+        const isAuthors = (target: string) => authorFileOf(absolutePath(cwd, target), paper.root) !== null
+        if (bashWritesTo(command, isAuthors, await authorNames($, paper.root))) return { deny: authorGuardMessage('the file this command writes') }
+      }
+    }
+
+    // an expert's file just written: load it now, so the agent exists from the next turn on
+    if (paper !== null && isFileWrite && /(^|\/)party\/[^/]+\.md$/.test(absolutePath(await $.session.cwd(), path))) {
+      const result = await next(e)
+      await loadParty($, paper.root).catch(() => [])
+      return result
+    }
 
     if (typeof input.agentId === 'string') void stepReview($, input.agentId, stepLabel(tool, input)).catch(() => undefined)
     if (turn !== null) {
@@ -577,14 +658,13 @@ export const register: Register = (on, options) => {
     }
     if (READ_ONLY_TOOLS.has(tool)) return next(e)
 
-    // The patterns above can be fooled; the manuscript cannot. Whatever changed in it while this
-    // call ran is recorded, shown and disclosed, so the git history can be read against it.
-    const paper = await findPaper($, pack).catch(() => null)
+    // The patterns above can be fooled; the files cannot. Whatever changed in the author's files
+    // while this call ran is recorded, shown and disclosed, so the git history can be read against it.
     if (paper === null) return next(e)
-    const before = await fingerprintManuscript($, paper).catch(() => null)
+    const before = await fingerprintAuthorFiles($, paper).catch(() => null)
     const result = await next(e)
     if (before === null) return result
-    const after = await fingerprintManuscript($, paper).catch(() => null)
+    const after = await fingerprintAuthorFiles($, paper).catch(() => null)
     const files = after === null ? [] : changedFiles(before, after)
     if (files.length > 0) void reportGuard($, cfg, paper, tool, guardInputOf(tool, input), files)
     return result
@@ -594,7 +674,7 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     // the paper's location and the author's briefing travel with every persona's task
     const briefed = personaById(e.subagentType)
-    const paper = briefed !== undefined ? await findPaper($, pack).catch(() => null) : null
+    const paper = briefed !== undefined ? await findPaper($).catch(() => null) : null
     const brief = paper ? briefFor(await readBriefs($, paper.root).catch(() => ({})), briefed!.id) : ''
     const isElsewhere = paper !== null && paper.root !== (await $.session.cwd())
     const extra = [
@@ -621,9 +701,12 @@ export const register: Register = (on, options) => {
     return result
   }).catch(($, e, next) => next(e))
 
-  on('agent.offer', ($, e, next) => {
+  // Only the members of this paper's party are offered to the model; the rest of the catalogue waits.
+  on('agent.offer', async ($, e, next) => {
     const persona = personaById(e.agent)
-    if (persona !== undefined && persona.pack !== 'core' && persona.pack !== pack) return { isOffered: false }
+    if (persona === undefined) return next(e)
+    const paper = await findPaper($)
+    if (paper !== null && !paper.party.includes(persona.id)) return { isOffered: false }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -636,7 +719,7 @@ export const register: Register = (on, options) => {
     if (turn === null) return result
     const done = turn
     turn = null
-    const paper = await findPaper($, pack)
+    const paper = await findPaper($)
     if (paper === null) return result
     const isAiText = e.answer.includes(AI_TEXT_MARKER)
     await appendLog($, paper.root, {
@@ -739,6 +822,8 @@ export const register: Register = (on, options) => {
       const asked = /cw:([a-z0-9-]+) agent to answer my question: "(.*)"\. It may/.exec(e.props.text)
       const briefing = /^Brief (.+?) for this paper\./.exec(e.props.text)
       if (briefing) return <Text dimColor>📋 Briefing {briefing[1]}</Text>
+      const creating = /^Add "([^"]+)" to my review party/.exec(e.props.text)
+      if (creating) return <Text dimColor>🎭 Creating {creating[1]}</Text>
       if (e.props.text.startsWith('Help me set the scope')) return <Text dimColor>🎯 Setting the scope</Text>
       const match = summoned ?? asked
       const persona = personaById(match?.[1] ?? '')
@@ -770,7 +855,7 @@ export const register: Register = (on, options) => {
       tab,
       watch,
       onWatchToggle: () => void setWatching($, cfg, !watch.isOn),
-      personas: activePersonas(snapshot.paper?.domainPack ?? pack),
+      personas: partyPersonas(snapshot.paper?.party ?? []),
       isGame,
       onTab: next => void update($, tabAtom, () => next),
       onSummon: id => void summon($, cfg, id, ''),

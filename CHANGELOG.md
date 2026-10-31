@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### A review party of your own
+
+The medicine domain pack is gone; every paper composes its own party instead.
+
+- `/cw:init` asks who joins: the nine general personas, The Clinician for medical texts, and any expert of the author's own. `paper.json` keeps the roster (`party`); a `paper.json` from before keeps its party, the clinician included where the pack was medicine.
+- An expert the catalogue lacks is a `party/<id>.md` file: frontmatter (`name`, `short`, `role`, `category`, `colour`), then its perspective and voice. The plugin appends the party's shared ground rules, registers it as the `cw:<id>` agent with read-only tools, draws it in the pane, briefs it from `party.md` and levels it like the others. `/cw:party new <id> "<Name>" <role>` writes the skeleton and Claude interviews the author to fill it in; `party/` is one of Claude's places for that.
+- `/cw:party` lists the party, `add`/`remove` change the catalogue members. Only members are offered to the model, shown in the pane, and accepted by `/cw:summon`, `/cw:ask`, `/cw:brief` and `/cw:watch`.
+- The *Domain pack* option is gone from the plugin's settings.
+- Fixed: `/cw:summon`, `/cw:ask`, `/cw:brief <persona>` (the interview) and `/cw:scope edit` typed as commands failed on current Claude Code builds, which refuse a prompt submitted from inside a command's hook. The hook now checks the arguments and hands the command on to its skill text, which the model runs; the log entry comes from the command itself. The pane's buttons are unchanged.
+
+### The author's files, not only the manuscript
+
+Inside a paper, Claude now writes only in its own places: `notes/ai/`, `ai-log/`, `disclosure/`, `scope.md`, `.cowriting/`, `build/`. Everything else is the author's.
+
+- The hook refuses file tools and shell writes for any of the author's files in the paper (`literature/`, `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/`, …), not only `manuscript/`, and names the file in its refusal. A `manuscript` folder stays refused wherever it is.
+- The shell pattern treats the folder's name as a path only (`manuscript/`, `"manuscript"`), no longer as any word: a `grep` for the word is not refused any more.
+- The workspace's `.claude/settings.json` (from `/cw:init`) now carries `Edit` deny rules for all of the author's files and turns on Claude Code's Bash sandbox with those paths on its write deny list, so the operating system refuses what the patterns cannot see. The network allow list keeps `verify_refs.py` and, on macOS, the Zotero search working. In the `projects/<name>/` layout the rules are merged into the workspace root's settings, where Claude Code reads them.
+- The comparison after a writing tool covers all of the author's files. The disclosure lists the manuscript changes; `ailog.py stats` counts both.
+- The three personas with a Write tool are told it is for `notes/ai/` only. Nothing could be trimmed from the tool lists: each one is used by a tool script or a note.
+
+### Pane, read at 48 columns
+
+Every tab was rendered at 48, 80 and 120 columns through the test harness and read as the author would see it.
+
+- The key legend under the tabs is gone; the buttons already show their keys. Only "Esc back to prompt" stays.
+- Persona cards: "asked 2×" instead of "2×", the 📋 for a briefed persona sits next to the name, and the cards are two columns wider so the longest name has a gap.
+- Log tab: the turns waiting on a classify card are no longer listed a second time above them; what remains is "Earlier". The first card says which keys classify it. Previews, answers, points, section names and the goal end in "…" where they were cut, instead of mid-word.
+- Scope tab: the "≈ Overall" label no longer touches its bar.
+- Progress tab: the XP line shows the next level's target ("87 / 100 XP").
+- Live tab: "Live review is off · off" no longer repeats itself.
+- The reminder band says "Did you use this in your text?" next to the quoted answer, so the four buttons clearly belong to it and not to the guard nudge above.
+- Times are the author's local clock everywhere (log, cards, scope check, live status), not UTC.
+- "1 answer", "2 hints", "3 days" instead of "answer(s)", "hint(s)", "day(s)".
+- `/cw:pane` lists `scope` among its tabs.
+
 ## 0.1.0 (2026-10-31)
 
 First release, after a critical review of the initial build.

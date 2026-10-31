@@ -7,8 +7,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { GameFile, LogEntry, Paper } from '../types'
-import { BRIEF_FILE, NEW_GAME, countWords, monthFile, parseBriefs, parseLog, setBrief } from './core'
+import { BRIEF_FILE, NEW_GAME, authorFileOf, countWords, isAuthorsName, monthFile, parseBriefs, parseLog, setBrief } from './core'
 import type { Fingerprint } from './core'
+import { CUSTOM_TOOLS, DEFAULT_PARTY, PERSONAS, customDescription, customPersonas, parsePersonaFile, setCustomPersonas } from './personas'
+import type { CustomPersona } from './personas'
 
 type $ = EngineInterface
 
@@ -23,14 +25,20 @@ async function readJson<T>($: $, path: string): Promise<T | undefined> {
   }
 }
 
-type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'domainPack' | 'autosave'>>
+type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave'>> & { domainPack?: string }
 
-const asPaper = (root: string, json: PaperJson, fallbackPack: string): Paper => ({
+/** The catalogue members of a paper's party: its roster, or for a paper.json from before rosters, the old domain pack's. */
+export const catalogParty = (json: PaperJson): string[] => {
+  if (Array.isArray(json.party)) return json.party.filter(id => PERSONAS.some(p => p.id === id))
+  return json.domainPack === 'medicine' ? PERSONAS.map(p => p.id) : [...DEFAULT_PARTY]
+}
+
+const asPaper = (root: string, json: PaperJson): Paper => ({
   root,
   name: json.name ?? root.split('/').pop() ?? 'paper',
   format: json.format === 'latex' ? 'latex' : 'markdown',
   language: json.language === 'de' ? 'de' : 'en',
-  domainPack: json.domainPack ?? fallbackPack,
+  party: [...catalogParty(json), ...customPersonas().filter(p => loadedRoot === root).map(p => p.id)],
   autosave: json.autosave !== false,
 })
 
@@ -41,24 +49,80 @@ const RECENT_KEY = 'recentPapers'
 const KEEP_RECENT = 8
 
 /** The paper the session works on, or null outside a CoWriting workspace. */
-export async function findPaper($: $, fallbackPack: string): Promise<Paper | null> {
+export async function findPaper($: $): Promise<Paper | null> {
   const chosen = await read($, paperRootAtom)
   if (chosen !== null) {
     const json = await readJson<PaperJson>($, join(chosen, 'paper.json'))
-    if (json !== undefined) return asPaper(chosen, json, fallbackPack)
+    if (json !== undefined) return asPaper(chosen, json)
   }
   const cwd = await $.session.cwd()
   const here = await readJson<PaperJson>($, join(cwd, 'paper.json'))
-  if (here !== undefined) return asPaper(cwd, here, fallbackPack)
+  if (here !== undefined) return asPaper(cwd, here)
 
   const marker = join(cwd, '.active-project')
   if (await $.fs.exists(marker)) {
     const name = (await $.fs.read(marker)).trim()
     const root = join(cwd, 'projects', name)
     const json = await readJson<PaperJson>($, join(root, 'paper.json'))
-    if (json !== undefined) return asPaper(root, json, fallbackPack)
+    if (json !== undefined) return asPaper(root, json)
   }
   return null
+}
+
+// ---------------------------------------------------------------- the party
+
+/** The author's own experts: party/<id>.md files in the paper folder. */
+export const PARTY_DIR = 'party'
+
+// the paper whose experts personas.ts holds, and the prompt each one was registered with
+let loadedRoot: string | null = null
+const registered = new Map<string, string>()
+
+/** The party/<id>.md files of a paper as personas, with the ids of files that are not one. */
+export async function readCustomPersonas($: $, root: string): Promise<{ experts: CustomPersona[]; broken: string[] }> {
+  const dir = join(root, PARTY_DIR)
+  const experts: CustomPersona[] = []
+  const broken: string[] = []
+  if (!(await $.fs.exists(dir))) return { experts, broken }
+  const files = (await $.fs.list(dir)).filter(f => f.kind === 'file' && f.name.endsWith('.md')).map(f => f.name).sort()
+  for (const name of files) {
+    const id = name.slice(0, -3)
+    const parsed = parsePersonaFile(id, await $.fs.read(join(dir, name)).catch(() => ''))
+    if (parsed === null) broken.push(id)
+    else experts.push(parsed)
+  }
+  return { experts, broken }
+}
+
+/**
+ * Reads the paper's experts, makes them known to the pane and the commands, and registers each as a
+ * cw:<id> agent type the model can dispatch from the next turn on; one already registered with the
+ * same prompt is left alone. Returns the ids of files that are not a persona.
+ */
+export async function loadParty($: $, root: string): Promise<string[]> {
+  const { experts, broken } = await readCustomPersonas($, root)
+  if (loadedRoot !== root) registered.clear()
+  loadedRoot = root
+  setCustomPersonas(experts.map(e => e.persona))
+  for (const { persona, prompt } of experts) {
+    if (registered.get(persona.id) === prompt) continue
+    try {
+      await $.agent.register({ name: persona.id, description: customDescription(persona), prompt, tools: CUSTOM_TOOLS })
+      registered.set(persona.id, prompt)
+    } catch {
+      // not bound yet, or the spec refused: the next load tries again
+    }
+  }
+  for (const id of [...registered.keys()]) if (!experts.some(e => e.persona.id === id)) registered.delete(id)
+  return broken
+}
+
+/** Writes the roster of catalogue members into paper.json, keeping everything else in it. */
+export async function writeParty($: $, root: string, ids: readonly string[]): Promise<void> {
+  const path = join(root, 'paper.json')
+  const json = (await readJson<PaperJson & Record<string, unknown>>($, path)) ?? {}
+  const { domainPack: _pack, ...rest } = json
+  await $.fs.write(path, `${JSON.stringify({ ...rest, party: ids }, null, 2)}\n`)
 }
 
 export async function readLog($: $, root: string): Promise<LogEntry[]> {
@@ -104,27 +168,37 @@ export function appendLog($: $, root: string, entry: LogEntry): Promise<void> {
 
 const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
 
-/** Every file under the paper's manuscript folder, a few levels deep. */
-export async function listManuscriptFiles($: $, dir: string, depth = 0): Promise<string[]> {
+/** Folders never compared: git's own, and dependencies a build may pull in. */
+const SKIPPED_FOLDERS = new Set(['.git', 'node_modules'])
+
+/** Every file of the author's under the paper, a few levels deep: Claude's places are left out. */
+export async function listAuthorFiles($: $, root: string, dir = root, depth = 0): Promise<string[]> {
   if (depth > 4 || !(await $.fs.exists(dir))) return []
   const out: string[] = []
   for (const entry of await $.fs.list(dir)) {
     const path = join(dir, entry.name)
-    if (entry.kind === 'dir') out.push(...(await listManuscriptFiles($, path, depth + 1)))
-    else if (entry.kind === 'file') out.push(path)
+    if (entry.kind === 'dir') {
+      if (SKIPPED_FOLDERS.has(entry.name) || authorFileOf(join(path, 'x'), root) === null) continue
+      out.push(...(await listAuthorFiles($, root, path, depth + 1)))
+    } else if (entry.kind === 'file' && authorFileOf(path, root) !== null) out.push(path)
   }
   return out
 }
 
-/** The manuscript's files as they are now: relative path → `mtime:size`. */
-export async function fingerprintManuscript($: $, paper: Paper): Promise<Fingerprint> {
-  const dir = join(paper.root, 'manuscript')
+/** The author's files as they are now: relative path → `mtime:size`. */
+export async function fingerprintAuthorFiles($: $, paper: Paper): Promise<Fingerprint> {
   const out: Record<string, string> = {}
-  for (const path of await listManuscriptFiles($, dir)) {
+  for (const path of await listAuthorFiles($, paper.root)) {
     const stat = await $.fs.stat(path).catch(() => null)
     if (stat !== null) out[path.slice(paper.root.length + 1)] = `${stat.mtimeMs}:${stat.size}`
   }
   return out
+}
+
+/** The names at the paper's root that are wholly the author's: what a shell command may not write to. */
+export async function authorNames($: $, root: string): Promise<string[]> {
+  const entries = await $.fs.list(root).catch(() => [])
+  return entries.map(e => e.name).filter(name => !SKIPPED_FOLDERS.has(name) && isAuthorsName(name))
 }
 
 async function wordsUnder($: $, dir: string, depth: number): Promise<number> {
@@ -237,8 +311,8 @@ export async function targetFolder($: $, arg: string): Promise<string | null> {
 }
 
 /** /cw:paper without arguments: the active paper and the recent ones. */
-export async function describePapers($: $, fallbackPack: string): Promise<string> {
-  const paper = await findPaper($, fallbackPack)
+export async function describePapers($: $): Promise<string> {
+  const paper = await findPaper($)
   const recent = await recentPapers($)
   const lines = [paper === null ? 'No active paper.' : `Active paper: ${paper.name} · ${paper.root}`]
   if (recent.length > 0) lines.push('Recent:', ...recent.map((r, i) => `  ${i + 1}  ${r}`))

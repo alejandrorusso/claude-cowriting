@@ -1,8 +1,34 @@
 {
   "permissions": {
     "deny": [
-      "Edit(manuscript/**)",
-      "Edit(**/manuscript/**)"
+      "Edit({{prefix}}manuscript/**)",
+      "Edit(**/manuscript/**)",
+      "Edit({{prefix}}literature/**)",
+      "Edit({{prefix}}paper.json)",
+      "Edit({{prefix}}CLAUDE.md)",
+      "Edit({{prefix}}party.md)",
+      "Edit({{prefix}}.gitignore)",
+      "Edit({{prefix}}.claude/**)",
+      "Edit({{prefix}}.vscode/**)"
     ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyWrite": [
+        "./{{prefix}}manuscript",
+        "./{{prefix}}literature",
+        "./{{prefix}}paper.json",
+        "./{{prefix}}CLAUDE.md",
+        "./{{prefix}}party.md",
+        "./{{prefix}}.gitignore",
+        "./{{prefix}}.claude",
+        "./{{prefix}}.vscode"
+      ]
+    },
+    "network": {
+      "allowLocalBinding": true,
+      "allowedDomains": ["api.crossref.org", "doi.org", "*.doi.org"]
+    }
   }
 }

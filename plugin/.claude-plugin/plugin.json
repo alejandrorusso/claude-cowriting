@@ -1,7 +1,7 @@
 {
   "name": "cw",
   "version": "0.1.0",
-  "description": "Assist-only academic co-writing following DFG good scientific practice: hints instead of ghostwriting, a complete AI log, generated AI disclosure, and a pixel-art review party.",
+  "description": "Assist-only academic co-writing following DFG good scientific practice: hints instead of ghostwriting, a complete AI log, generated AI disclosure, and a pixel-art review party you compose yourself.",
   "author": {
     "name": "CoWriting contributors"
   },
@@ -37,16 +37,6 @@
       "options": [
         "en",
         "de"
-      ]
-    },
-    "domainPack": {
-      "type": "string",
-      "title": "Domain pack",
-      "description": "Extra personas for your field.",
-      "default": "none",
-      "options": [
-        "none",
-        "medicine"
       ]
     },
     "autosave": {

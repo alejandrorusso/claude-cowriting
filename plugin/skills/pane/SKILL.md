@@ -1,7 +1,7 @@
 ---
 name: pane
-description: Open the CoWriting pane: review party, live hints, AI log, progress.
-argument-hint: "[party|live|log|progress]"
+description: Open the CoWriting pane: review party, live hints, AI log, scope, progress.
+argument-hint: "[party|live|log|scope|progress]"
 disable-model-invocation: true
 ---
 

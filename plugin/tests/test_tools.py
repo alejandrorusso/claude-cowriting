@@ -75,7 +75,9 @@ class PaperWorkspace(unittest.TestCase):
             self.assertTrue((self.root / rel).exists(), rel)
         self.assertFalse((self.root / "manuscript" / "main.md").exists(), "a LaTeX paper gets no Markdown skeleton")
         paper = json.loads((self.root / "paper.json").read_text(encoding="utf-8"))
-        self.assertEqual(paper, {"name": "Testarbeit", "format": "latex", "language": "de", "domainPack": "none"})
+        self.assertEqual(paper, {"name": "Testarbeit", "format": "latex", "language": "de",
+                                 "party": ["grammar-guy", "statistics-nerd", "reviewer-2", "librarian", "architect",
+                                           "integrity-guardian", "lay-reader", "style-coach", "terminologist"]})
         self.assertIn("ngerman", (self.root / "manuscript" / "main.tex").read_text(encoding="utf-8"))
         self.assertNotIn("ai-log", (self.root / ".gitignore").read_text(encoding="utf-8").replace("Keep ai-log", ""))
 
@@ -85,13 +87,53 @@ class PaperWorkspace(unittest.TestCase):
         self.assertIn("party.md (kept", again.stdout)
         self.assertEqual((self.root / "party.md").read_text(encoding="utf-8"), "mine")
 
+    def test_the_party_is_chosen_at_the_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            chosen = run("new_paper.py", "--format", "markdown", "--party", "reviewer-2,clinician, architect", "--dir", tmp, cwd=Path(tmp))
+            self.assertEqual(chosen.returncode, 0, chosen.stderr)
+            paper = json.loads((Path(tmp) / "paper.json").read_text(encoding="utf-8"))
+            self.assertEqual(paper["party"], ["reviewer-2", "clinician", "architect"])
+            self.assertNotIn("domainPack", paper)
+            wrong = run("new_paper.py", "--format", "markdown", "--party", "doctor", "--dir", tmp, cwd=Path(tmp))
+            self.assertNotEqual(wrong.returncode, 0)
+            self.assertIn("not in the catalogue: doctor", wrong.stderr)
+
+    def test_settings_keep_claude_out_of_the_authors_files(self) -> None:
+        text = (self.root / ".claude" / "settings.json").read_text(encoding="utf-8")
+        self.assertNotIn("{{", text, "every placeholder is filled")
+        settings = json.loads(text)
+        deny = settings["permissions"]["deny"]
+        for rule in ("Edit(manuscript/**)", "Edit(literature/**)", "Edit(CLAUDE.md)", "Edit(.claude/**)"):
+            self.assertIn(rule, deny)
+        self.assertNotIn("Edit(scope.md)", deny, "Claude may write down the author's answers in the plan")
+        self.assertTrue(settings["sandbox"]["enabled"])
+        for path in ("./manuscript", "./literature", "./paper.json", "./.claude"):
+            self.assertIn(path, settings["sandbox"]["filesystem"]["denyWrite"])
+        self.assertIn("api.crossref.org", settings["sandbox"]["network"]["allowedDomains"], "verify_refs.py keeps working")
+
+    def test_project_layout_puts_the_rules_at_the_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            for project in ("alpha", "beta"):
+                done = run("new_paper.py", "--format", "markdown", "--project", project, "--dir", str(ws), cwd=ws)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn("(at the workspace root, merged)", done.stdout)
+                self.assertFalse((ws / "projects" / project / ".claude").exists(), "settings in the paper folder would not be read")
+            settings = json.loads((ws / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            deny = settings["permissions"]["deny"]
+            self.assertIn("Edit(projects/alpha/manuscript/**)", deny)
+            self.assertIn("Edit(projects/beta/manuscript/**)", deny)
+            self.assertEqual(deny.count("Edit(**/manuscript/**)"), 1, "a rule both papers bring is kept once")
+            self.assertIn("./projects/beta/literature", settings["sandbox"]["filesystem"]["denyWrite"])
+            self.assertEqual((ws / ".active-project").read_text(encoding="utf-8").strip(), "beta")
+
     # ---------------------------------------------------------------- ailog
 
     def test_stats_and_list_follow_the_pane(self) -> None:
         stats = run("ailog.py", "stats", cwd=self.root)
         self.assertEqual(stats.returncode, 0, stats.stderr)
         # a1 is annotated, a3 is a live review, a4 only launched a reviewer: a2 alone is owed a classification
-        self.assertIn("Turns: 4  unannotated: 1  [AI-TEXT]: 1  manuscript changes during AI tool calls: 1", stats.stdout)
+        self.assertIn("Turns: 4  unannotated: 1  [AI-TEXT]: 1  changes to your files during AI tool calls: 1 (in the manuscript: 1)", stats.stdout)
         self.assertIn("Bash: manuscript/main.tex", stats.stdout)
         listed = run("ailog.py", "list", cwd=self.root).stdout
         self.assertRegex(listed, r"a1 .*✓ adapted")
@@ -142,6 +184,22 @@ class PaperWorkspace(unittest.TestCase):
         run("ailog.py", "disclosure", cwd=self.root)
         text = self.read("ai-register.en.md")
         self.assertIn("## Manuscript changes detected during AI tool calls\n\nNone.", text)
+
+    def test_disclosure_lists_only_manuscript_changes_the_log_keeps_the_rest(self) -> None:
+        log = self.root / "ai-log" / "2026-10.jsonl"
+        bib = {"type": "guard", "ts": "2026-10-06T10:00:00Z", "session": "s", "paper": "Testarbeit", "tool": "Bash",
+               "input": "python3 export.py", "files": ["literature/references.bib"]}
+        both = {"type": "guard", "ts": "2026-10-07T10:00:00Z", "session": "s", "paper": "Testarbeit", "tool": "Write",
+                "input": "CLAUDE.md", "files": ["CLAUDE.md", "manuscript/ch2.tex"]}
+        log.write_text("".join(json.dumps(e) + "\n" for e in FIXTURE + [bib, both]), encoding="utf-8")
+        stats = run("ailog.py", "stats", cwd=self.root)
+        self.assertIn("changes to your files during AI tool calls: 3 (in the manuscript: 2)", stats.stdout)
+        self.assertIn("Bash: literature/references.bib", stats.stdout)
+        run("ailog.py", "disclosure", cwd=self.root)
+        text = self.read("ai-register.en.md")
+        self.assertIn("- 2026-10-04: Bash – manuscript/main.tex\n- 2026-10-07: Write – manuscript/ch2.tex\n", text)
+        self.assertNotIn("references.bib", text)
+        self.assertNotIn("CLAUDE.md", text)
 
     def test_prompts_appendix_lists_every_input_in_order(self) -> None:
         self.assertEqual(run("ailog.py", "prompts", "--lang", "de", "--format", "md", "--answers", cwd=self.root).returncode, 0)
