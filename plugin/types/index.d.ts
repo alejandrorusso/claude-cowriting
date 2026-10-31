@@ -1,4 +1,4 @@
-// The cw (CoWriting) plugin's state contract and the shapes its hooks share.
+// The cowrite (CoWriting) plugin's state contract and the shapes its hooks share.
 
 export type PromptEntry = {
   type: 'prompt'
@@ -250,7 +250,7 @@ export type WatchState = {
 
 declare module 'claude-code' {
   interface PluginState {
-    cw: {
+    cowrite: {
       tab: Tab
       snapshot: Shaped<Snapshot>
       isBandHidden: boolean
@@ -259,7 +259,7 @@ declare module 'claude-code' {
       /** null: the focusMode option decides */
       focus: FocusMode | null
       usage: Shaped<Usage>
-      /** a paper folder opened with /cw:paper <path>; null: the session's folder decides */
+      /** a paper folder opened with /cowrite:paper <path>; null: the session's folder decides */
       paperRoot: string | null
     }
   }

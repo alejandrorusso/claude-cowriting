@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "cw",
+      "name": "cowrite",
       "source": "./plugin",
       "description": "Assist-only academic co-writing: Claude gives hints, critique and literature help but never writes your manuscript. Logs every AI input, generates an AI disclosure, and adds a pixel-art review party."
     }

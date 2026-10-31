@@ -2,9 +2,9 @@
 
 <!-- You write this file: your plan for the paper, in your words. CoWriting measures the manuscript against it
      and shows the progress in the pane's Scope tab and the status line (🎯).
-     Fill in what you know; leave out what doesn't apply. /cw:scope edit sets it up with you in a short interview.
+     Fill in what you know; leave out what doesn't apply. /cowrite:scope edit sets it up with you in a short interview.
      Words, figures, tables, references and open markers (TODO, FIXME, ??, UNVERIFIED) are counted without AI.
-     Whether a point is made is judged by a small model only when you ask: /cw:scope check (logged). -->
+     Whether a point is made is judged by a small model only when you ask: /cowrite:scope check (logged). -->
 
 ## Goal
 <!-- What should a reader know, believe or be able to do after reading? One to three sentences. -->

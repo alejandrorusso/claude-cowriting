@@ -1,5 +1,5 @@
 {
-  "name": "cw",
+  "name": "cowrite",
   "version": "0.2.0",
   "description": "Assist-only academic co-writing following DFG good scientific practice: hints instead of ghostwriting, a complete AI log, generated AI disclosure, and a pixel-art review party you compose yourself.",
   "author": {
@@ -60,13 +60,13 @@
     "watchModel": {
       "type": "string",
       "title": "Live review model",
-      "description": "Model for /cw:watch live hints while you write (a small, fast one keeps it cheap), e.g. haiku.",
+      "description": "Model for /cowrite:watch live hints while you write (a small, fast one keeps it cheap), e.g. haiku.",
       "default": "haiku"
     },
     "focusMode": {
       "type": "string",
       "title": "Focus mode",
-      "description": "How much of Claude Code's own work the transcript shows: off (all), calm (one dim line per action), focus (only you and the personas). /cw:quiet switches it per session.",
+      "description": "How much of Claude Code's own work the transcript shows: off (all), calm (one dim line per action), focus (only you and the personas). /cowrite:quiet switches it per session.",
       "default": "calm",
       "options": [
         "off",

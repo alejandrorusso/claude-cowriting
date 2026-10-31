@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions are welcome, especially **personas** for other fields: law, engineering, humanities, education, and so on. An expert for one paper needs no code (`/cw:party new` writes a `party/<id>.md` file); the catalogue is for perspectives many authors want.
+Contributions are welcome, especially **personas** for other fields: law, engineering, humanities, education, and so on. An expert for one paper needs no code (`/cowrite:party new` writes a `party/<id>.md` file); the catalogue is for perspectives many authors want.
 
 ## The one rule
 
@@ -21,7 +21,7 @@ Every feature must keep the author the author. Nothing in CoWriting may write ma
 3. **Images:** run `python3 scripts/render_sprites.py` and add the persona to the README table.
 4. **Checks:** run `claude plugin test plugin`. The sprite test checks size and colours.
 
-5. **Default party:** a persona every author wants is in `DEFAULT_PARTY` (`plugin/hooks/personas.ts`) and `DEFAULT_PARTY` in `plugin/tools/new_paper.py`; a field-specific one, like the Clinician, stays out of it and joins with `/cw:party add <id>`. Personas outside a paper's party are hidden from the model (`agent.offer`) and from the pane.
+5. **Default party:** a persona every author wants is in `DEFAULT_PARTY` (`plugin/hooks/personas.ts`) and `DEFAULT_PARTY` in `plugin/tools/new_paper.py`; a field-specific one, like the Clinician, stays out of it and joins with `/cowrite:party add <id>`. Personas outside a paper's party are hidden from the model (`agent.offer`) and from the pane.
 
 ## Development
 

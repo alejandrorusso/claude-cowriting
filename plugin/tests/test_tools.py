@@ -41,7 +41,7 @@ FIXTURE = [
     {"type": "response", "ref": "a3", "ts": "2026-10-03T10:00:05Z", "model": "haiku", "plugin": "0.1.0", "claude_code": "2.1.300",
      "personas": ["grammar-guy"], "tools_used": [], "ai_text_flag": False, "answer": "(no hints)"},
     {"type": "prompt", "id": "a4", "ts": "2026-10-04T10:00:00Z", "session": "s", "paper": "Testarbeit", "category": "terminology",
-     "text": "Use the cw:terminologist agent to review main.tex"},
+     "text": "Use the cowrite:terminologist agent to review main.tex"},
     {"type": "response", "ref": "a4", "ts": "2026-10-04T10:00:05Z", "model": "claude-opus-5-5", "plugin": "0.1.0",
      "claude_code": "2.1.300", "personas": ["terminologist"], "agents": {"agent-1": "terminologist"}, "tools_used": ["Agent"],
      "ai_text_flag": False, "answer": "The Terminologist is on it."},
@@ -265,7 +265,7 @@ class PaperWorkspace(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty:
             failed = run("ailog.py", "stats", cwd=Path(empty))
             self.assertNotEqual(failed.returncode, 0)
-            self.assertIn("/cw:init", failed.stderr)
+            self.assertIn("/cowrite:init", failed.stderr)
 
 
 class PureFunctions(unittest.TestCase):

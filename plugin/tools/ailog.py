@@ -77,7 +77,7 @@ def find_paper(start: Path) -> Path:
         root = start / "projects" / marker.read_text(encoding="utf-8").strip()
         if (root / "paper.json").exists():
             return root
-    sys.exit("No CoWriting paper here (no paper.json or .active-project). Run /cw:init first.")
+    sys.exit("No CoWriting paper here (no paper.json or .active-project). Run /cowrite:init first.")
 
 
 def read_entries(root: Path) -> list[dict]:

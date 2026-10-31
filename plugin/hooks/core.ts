@@ -40,7 +40,7 @@ const COMMAND_CATEGORY: Readonly<Record<string, string>> = {
   submit: 'integrity',
 }
 
-const bare = (name: string) => name.replace(/^cw:/, '')
+const bare = (name: string) => name.replace(/^(cowrite|cw):/, '')
 
 export const categoryFor = (command: string | undefined, text: string): string => {
   if (command !== undefined) {
@@ -52,7 +52,7 @@ export const categoryFor = (command: string | undefined, text: string): string =
     }
     return COMMAND_CATEGORY[name] ?? 'general'
   }
-  const summoned = /cw:([a-z0-9-]+) agent/.exec(text)
+  const summoned = /cowrite:([a-z0-9-]+) agent/.exec(text)
   if (summoned) return personaById(summoned[1]!)?.category ?? 'general'
   return 'general'
 }
@@ -570,7 +570,7 @@ export const parseHints = (text: string, personas: readonly string[]): ParsedHin
   if (!Array.isArray(value)) return []
   const out: ParsedHint[] = []
   for (const item of value as Record<string, unknown>[]) {
-    const persona = typeof item?.persona === 'string' ? item.persona.replace(/^cw:/, '') : ''
+    const persona = typeof item?.persona === 'string' ? item.persona.replace(/^(cowrite|cw):/, '') : ''
     const hint = typeof item?.hint === 'string' ? squash(item.hint) : ''
     if (!personas.includes(persona) || hint === '') continue
     out.push({ persona, line: Number(item.line) || 0, hint: hint.slice(0, 240) })

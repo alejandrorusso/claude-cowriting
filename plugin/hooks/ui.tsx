@@ -34,7 +34,7 @@ type PaneProps = {
 const CARD = 17
 const SVG_SIZE = 44
 const USES = ['adopted', 'adapted', 'rejected', 'info'] as const
-// One key per button while the pane holds the keyboard (/cw:pane focuses it).
+// One key per button while the pane holds the keyboard (/cowrite:pane focuses it).
 const USE_HOTKEY: Readonly<Record<(typeof USES)[number], string>> = { adopted: 'a', adapted: 'd', rejected: 'x', info: 'i' }
 
 /** Subagents don't report how far they are: the bar fills with each step and only completes when done. */
@@ -71,8 +71,8 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
     return (
       <Box flexDirection="column">
         <Text weight="bold">CoWriting</Text>
-        <Text dimColor>No paper here yet. Open one with /cw:paper &lt;path&gt;</Text>
-        <Text dimColor>(/cw:paper alone lists recent ones), or set one up with /cw:init.</Text>
+        <Text dimColor>No paper here yet. Open one with /cowrite:paper &lt;path&gt;</Text>
+        <Text dimColor>(/cowrite:paper alone lists recent ones), or set one up with /cowrite:init.</Text>
       </Box>
     )
   }
@@ -129,7 +129,7 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
           hour. Every review is logged.
         </Text>
         <Button key="watch-toggle" label={watch.isOn ? 'Stop watching' : 'Start watching'} hotkey="w" onPress={props.onWatchToggle} />
-        {watch.hints.length === 0 && <Text dimColor>No hints yet. Start with /cw:watch, then write.</Text>}
+        {watch.hints.length === 0 && <Text dimColor>No hints yet. Start with /cowrite:watch, then write.</Text>}
         {watch.hints.map((hint, i) => (
           <Text key={`hint-${i}`} dimColor={hint.ref !== latest?.ref}>
             <Text weight="bold">{personaById(hint.persona)?.name ?? hint.persona}</Text> <Text dimColor>{hint.file}:{hint.line}</Text> {hint.text}
@@ -229,7 +229,7 @@ export function drawPane($: $, e: RenderInput, props: PaneProps) {
   return (
     <Box flexDirection="column">
       {header}
-      <Text dimColor>click a name to summon · 📋 briefed · /cw:party changes who is here</Text>
+      <Text dimColor>click a name to summon · 📋 briefed · /cowrite:party changes who is here</Text>
       {rows.map((row, i) => (
         <Box key={`row-${i}`} flexDirection="row">
           {row.map(p => {

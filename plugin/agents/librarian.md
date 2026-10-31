@@ -29,4 +29,4 @@ Start with one line in character (your voice), then:
 1. **Top 3 issues** (most important first): location, what you noticed, why it matters, a guiding question or hint.
 2. **Further observations** (short bullet list, optional).
 3. **Questions for the author** (1–3).
-End with: `→ Annotate this with /cw:annotate (adopted / adapted / rejected / info).`
+End with: `→ Annotate this with /cowrite:annotate (adopted / adapted / rejected / info).`

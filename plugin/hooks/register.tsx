@@ -74,17 +74,17 @@ const EMPTY_SNAPSHOT: Snapshot = {
   scope: null,
 }
 
-export const snapshotAtom = atom({ plugin: 'cw', key: 'snapshot' } as const, EMPTY_SNAPSHOT, {
+export const snapshotAtom = atom({ plugin: 'cowrite', key: 'snapshot' } as const, EMPTY_SNAPSHOT, {
   shape: 'snapshot-4',
 })
-export const tabAtom = atom({ plugin: 'cw', key: 'tab' } as const, 'party' as Tab)
-export const bandHiddenAtom = atom({ plugin: 'cw', key: 'isBandHidden' } as const, false)
+export const tabAtom = atom({ plugin: 'cowrite', key: 'tab' } as const, 'party' as Tab)
+export const bandHiddenAtom = atom({ plugin: 'cowrite', key: 'isBandHidden' } as const, false)
 // the same value watch.ts keeps; the state scan wants each module's atoms declared in that module
-const watchAtom = atom({ plugin: 'cw', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
-const focusAtom = atom({ plugin: 'cw', key: 'focus' } as const, null as FocusMode | null)
-const usageAtom = atom({ plugin: 'cw', key: 'usage' } as const, EMPTY_USAGE as Usage, { shape: 'usage-1' })
+const watchAtom = atom({ plugin: 'cowrite', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
+const focusAtom = atom({ plugin: 'cowrite', key: 'focus' } as const, null as FocusMode | null)
+const usageAtom = atom({ plugin: 'cowrite', key: 'usage' } as const, EMPTY_USAGE as Usage, { shape: 'usage-1' })
 const FOCUS_MODES: readonly FocusMode[] = ['off', 'calm', 'focus']
-const reviewsAtom = atom({ plugin: 'cw', key: 'reviews' } as const, {} as Record<string, Review>, { shape: 'reviews-1' })
+const reviewsAtom = atom({ plugin: 'cowrite', key: 'reviews' } as const, {} as Record<string, Review>, { shape: 'reviews-1' })
 
 /** For a paper opened by path: the session's folder is somewhere else. */
 const elsewhereText = (root: string) =>
@@ -99,7 +99,7 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
     'The human is the sole author (DFG good scientific practice). You assist; you never ghostwrite.',
     '- Never write or rewrite prose meant for the manuscript (no paragraphs, rephrasings, abstracts, introductions). Files under manuscript/ are read-only for you.',
     '- Inside the paper you write only in notes/ai/, scope.md, disclosure/, party/ (the author\'s own review experts, at their request) and the log. Every other file (manuscript/, literature/, CLAUDE.md, party.md, paper.json, settings) is the author\'s: ask them to change it.',
-    `- The review party of this paper: ${partyPersonas(paper.party).map(p => `cw:${p.id} (${p.name})`).join(', ') || 'nobody yet'}. /cw:party changes it; a party/<id>.md file is an expert of the author's own.`,
+    `- The review party of this paper: ${partyPersonas(paper.party).map(p => `cowrite:${p.id} (${p.name})`).join(', ') || 'nobody yet'}. /cowrite:party changes it; a party/<id>.md file is an expert of the author's own.`,
     '- Give located feedback (file:line), Socratic questions, structure and argument critique, explanations, literature help, checklists and overviews.',
     '- Language exception: for grammar, spelling and punctuation you may show the corrected sentence together with the rule. No stylistic rewrites.',
     `- If the author explicitly insists on text written by you, start that text with ${AI_TEXT_MARKER} and remind them it must be disclosed.`,
@@ -109,7 +109,7 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
     vault !== ''
       ? `- Obsidian vault at ${vault}: read it as the author's knowledge base and cite their notes as [[note]]. Write only into ${vault}/${notesFolder}/${paper.name}/ with frontmatter ai_generated: true.`
       : '',
-    '- After substantial help, remind the author to annotate it (/cw:annotate).',
+    '- After substantial help, remind the author to annotate it (/cowrite:annotate).',
     `- Reply in the author's language; give manuscript feedback in the manuscript's language (${paper.language}).`,
   ]
     .filter(Boolean)
@@ -267,7 +267,7 @@ async function summon($: $, cfg: Config, personaId: string, target: string): Pro
   if (persona === undefined) return `Unknown persona "${personaId}".`
   const what = target === '' ? 'the section I am currently working on (ask me which, if unclear)' : target
   const text =
-    `Use the cw:${persona.id} agent to review ${what}. ` +
+    `Use the cowrite:${persona.id} agent to review ${what}. ` +
     'Relay its hints and questions as given; do not add rewritten text.'
   await submitAsAuthor($, cfg, text, persona.category, 'summon')
   return `${persona.name} joins the review…`
@@ -275,7 +275,7 @@ async function summon($: $, cfg: Config, personaId: string, target: string): Pro
 
 const KEEP_REVIEWS = 20
 
-/** /cw:party: who is in this paper's party, and the changes to it; `{ args }` hands a new expert to the skill's interview. */
+/** /cowrite:party: who is in this paper's party, and the changes to it; `{ args }` hands a new expert to the skill's interview. */
 async function partyCommand($: $, cfg: Config, paper: Paper, verb: string, words: string[]): Promise<string | { args: string }> {
   const broken = await loadParty($, paper.root).catch(() => [])
   const party = (await findPaper($))?.party ?? paper.party
@@ -290,11 +290,11 @@ async function partyCommand($: $, cfg: Config, paper: Paper, verb: string, words
       ...members.map(line),
       ...(bench.length > 0 ? ['Not in the party:', ...bench.map(p => `· ${p.id} · ${p.name}: ${p.role}`)] : []),
       ...(broken.length > 0 ? [`Not a persona (missing name, role or text): ${broken.map(id => `party/${id}.md`).join(', ')}`] : []),
-      '/cw:party add|remove <id …> · /cw:party new <id> "<Name>" <role…> makes an expert of your own',
+      '/cowrite:party add|remove <id …> · /cowrite:party new <id> "<Name>" <role…> makes an expert of your own',
     ].join('\n')
   }
   if (verb === 'add' || verb === 'remove') {
-    if (words.length === 0) return `Usage: /cw:party ${verb} <id …>`
+    if (words.length === 0) return `Usage: /cowrite:party ${verb} <id …>`
     const unknown = words.filter(w => !PERSONAS.some(p => p.id === w))
     const own = unknown.filter(w => customPersonas().some(p => p.id === w))
     if (own.length > 0 && verb === 'remove') return `${own.join(', ')}: your own experts are their files; delete party/<id>.md to retire one.`
@@ -309,19 +309,19 @@ async function partyCommand($: $, cfg: Config, paper: Paper, verb: string, words
     const [id = '', ...rest] = words
     if (!isCustomId(id)) {
       return id === ''
-        ? 'Usage: /cw:party new <id> "<Name>" <role…>, e.g. /cw:party new neurologist "The Neurologist" clinical neurology, diagnostics'
+        ? 'Usage: /cowrite:party new <id> "<Name>" <role…>, e.g. /cowrite:party new neurologist "The Neurologist" clinical neurology, diagnostics'
         : `"${id}" is not a free id: lowercase letters, digits and dashes, and not a catalogue persona's.`
     }
     const quoted = /^"([^"]+)"\s*(.*)$/.exec(rest.join(' '))
     const name = quoted?.[1] ?? rest.join(' ')
     const role = quoted?.[2]?.trim() ?? ''
     const file = `${paper.root}/party/${id}.md`
-    if (await $.fs.exists(file)) return `party/${id}.md exists already; edit it, or /cw:brief ${id} to tell them what to look for.`
+    if (await $.fs.exists(file)) return `party/${id}.md exists already; edit it, or /cowrite:brief ${id} to tell them what to look for.`
     await $.fs.write(file, personaFileSkeleton(id, name || id, role || '(what this expert looks at)'))
     await loadParty($, paper.root).catch(() => [])
     return { args: `new ${id} "${name || id}" ${role}`.trim() }
   }
-  return 'Usage: /cw:party [add|remove <id …> | new <id> "<Name>" <role…>]'
+  return 'Usage: /cowrite:party [add|remove <id …> | new <id> "<Name>" <role…>]'
 }
 
 /** A step of a persona at work: what the progress row and the party card show. */
@@ -334,7 +334,7 @@ const SCOPE_INTERVIEW =
 
 async function scopeCommand($: $, cfg: Config, verb: string): Promise<string> {
   const paper = await findPaper($)
-  if (paper === null) return 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.'
+  if (paper === null) return 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.'
   if (verb === 'check') {
     $.ui.toast('🎯 Checking your points…')
     const text = await checkPoints($, paper, cfg.watchModel)
@@ -348,7 +348,7 @@ async function scopeCommand($: $, cfg: Config, verb: string): Promise<string> {
   const { scope } = await refresh($, cfg)
   await update($, tabAtom, () => 'scope')
   await $.ui.open({ id: PANE, title: 'CoWriting', focus: true, backgroundColor: 'transparent' })
-  if (scope === null) return `No scope yet: /cw:scope edit sets it up with you, or write ${SCOPE_FILE} yourself.`
+  if (scope === null) return `No scope yet: /cowrite:scope edit sets it up with you, or write ${SCOPE_FILE} yourself.`
   const pct = (n: number) => `${Math.round(n * 100)} %`
   return `🎯 ≈ ${pct(scope.overall)} · content ${pct(scope.content)}${scope.finish === null ? '' : ` · finish ${pct(scope.finish)}`}`
 }
@@ -409,7 +409,7 @@ async function setWatching($: $, cfg: Config, isOn: boolean, personas?: string[]
   await refresh($, cfg)
 }
 
-/** A cw: command answers in place of its skill; if it fails, say so rather than run the skill's text. */
+/** A cowrite: command answers in place of its skill; if it fails, say so rather than run the skill's text. */
 function commandFailed() {
   return { text: 'CoWriting: that command failed. Try again, or restart Claude Code.' }
 }
@@ -441,34 +441,34 @@ export const register: Register = (on, options) => {
 
   // A typed command cannot submit a prompt from its hook (the engine holds that turn), so the
   // commands that need the model hand on to their skill's text; the pane's buttons submit directly.
-  on('command.run', { command: 'cw:scope' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:scope' }, async ($, e, next) => {
     const verb = e.args.trim().toLowerCase()
-    if (!['', 'check', 'edit', 'setup'].includes(verb)) return { text: 'Usage: /cw:scope [check|edit]' }
+    if (!['', 'check', 'edit', 'setup'].includes(verb)) return { text: 'Usage: /cowrite:scope [check|edit]' }
     if (verb === 'edit' || verb === 'setup') {
-      if ((await findPaper($)) === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+      if ((await findPaper($)) === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
       return next({ ...e, args: 'edit' })
     }
     return { text: await scopeCommand($, cfg, verb) }
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:pane' }, async ($, e) => {
+  on('command.run', { command: 'cowrite:pane' }, async ($, e) => {
     const wanted = e.args.trim().toLowerCase()
     const tab = (['party', 'live', 'log', 'scope', 'progress'] as const).find(t => t === wanted)
-    if (wanted !== '' && tab === undefined) return { text: 'Usage: /cw:pane [party|live|log|scope|progress]' }
+    if (wanted !== '' && tab === undefined) return { text: 'Usage: /cowrite:pane [party|live|log|scope|progress]' }
     if (tab !== undefined) await update($, tabAtom, () => tab)
     await refresh($, cfg)
     await $.ui.open({ id: PANE, title: 'CoWriting', focus: true, backgroundColor: 'transparent' })
     return { text: `CoWriting pane${tab ? ` · ${tab}` : ''} · keys 1–4 tabs, r refresh, Esc back` }
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:paper' }, async ($, e) => {
+  on('command.run', { command: 'cowrite:paper' }, async ($, e) => {
     const arg = e.args.trim()
     if (arg === '') return { text: await describePapers($) }
-    // /cw:paper upgrade: what an older workspace lacks; `apply` makes the changes, the author's copy kept
+    // /cowrite:paper upgrade: what an older workspace lacks; `apply` makes the changes, the author's copy kept
     const upgrade = /^upgrade(\s+apply)?$/.exec(arg)
     if (upgrade !== null) {
       const paper = await findPaper($)
-      if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+      if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
       const text = await upgradePaper($, paper.root, upgrade[1] !== undefined)
       if (upgrade[1] !== undefined) await refresh($, cfg)
       return { text }
@@ -479,15 +479,15 @@ export const register: Register = (on, options) => {
   }).catch(commandFailed)
 
   // the init skill does the setting up; a path argument makes that folder the session's paper
-  on('command.run', { command: 'cw:init' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:init' }, async ($, e, next) => {
     const arg = e.args.trim()
     if (arg !== '') await targetFolder($, arg)
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
-  on('command.run', { command: 'cw:watch' }, async ($, e) => {
+  on('command.run', { command: 'cowrite:watch' }, async ($, e) => {
     const paper = await findPaper($)
-    if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+    if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const state = await read($, watchAtom)
     const verb = words[0] === 'on' || words[0] === 'off' ? words.shift()! : words.length > 0 ? 'on' : state.isOn ? 'off' : 'on'
@@ -507,12 +507,12 @@ export const register: Register = (on, options) => {
     }
     await setWatching($, cfg, true, personas)
     const names = (await read($, watchAtom)).personas.map(id => personaById(id)?.name ?? id).join(', ')
-    return { text: `👁 Live review on · ${names} · hints show above the prompt when you pause · /cw:watch off` }
+    return { text: `👁 Live review on · ${names} · hints show above the prompt when you pause · /cowrite:watch off` }
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:brief' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:brief' }, async ($, e, next) => {
     const paper = await findPaper($)
-    if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+    if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
     const [who = '', ...rest] = e.args.trim().split(/\s+/)
     const active = partyPersonas(paper.party)
     if (who === '') {
@@ -523,7 +523,7 @@ export const register: Register = (on, options) => {
           'Briefs in party.md:',
           line('everyone', 'everyone'),
           ...active.map(p => line(p.id, p.id)),
-          '/cw:brief <persona> starts an interview · /cw:brief <persona> <text> sets it · or edit party.md',
+          '/cowrite:brief <persona> starts an interview · /cowrite:brief <persona> <text> sets it · or edit party.md',
         ].join('\n'),
       }
     }
@@ -543,27 +543,27 @@ export const register: Register = (on, options) => {
     return next({ ...e, args: key === 'everyone' ? 'everyone — the whole party' : `${persona!.id} — ${persona!.name}` })
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:party' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:party' }, async ($, e, next) => {
     const paper = await findPaper($)
-    if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+    if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
     const [verb = '', ...words] = e.args.trim().split(/\s+/).filter(Boolean)
     const answer = await partyCommand($, cfg, paper, verb.toLowerCase(), words)
     return typeof answer === 'string' ? { text: answer } : next({ ...e, args: answer.args })
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:ask' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:ask' }, async ($, e, next) => {
     const [who = '', ...rest] = e.args.trim().split(/\s+/)
     const persona = personaById(who)
     const question = rest.join(' ').trim()
-    if (persona === undefined || question === '') return { text: 'Usage: /cw:ask <persona> <question>' }
+    if (persona === undefined || question === '') return { text: 'Usage: /cowrite:ask <persona> <question>' }
     return next({ ...e, args: `${persona.id} ${question}` })
   }).catch(commandFailed)
 
-  on('command.run', { command: 'cw:quiet' }, async ($, e) => {
+  on('command.run', { command: 'cowrite:quiet' }, async ($, e) => {
     const wanted = e.args.trim().toLowerCase()
     const current = await focusMode($, cfg)
     const mode = wanted === '' ? FOCUS_MODES[(FOCUS_MODES.indexOf(current) + 1) % FOCUS_MODES.length]! : FOCUS_MODES.find(m => m === wanted)
-    if (mode === undefined) return { text: 'Usage: /cw:quiet [off|calm|focus]' }
+    if (mode === undefined) return { text: 'Usage: /cowrite:quiet [off|calm|focus]' }
     await update($, focusAtom, () => mode)
     const what = {
       off: 'Claude Code shows all its work.',
@@ -579,13 +579,13 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('command.run', { command: 'cw:summon' }, async ($, e, next) => {
+  on('command.run', { command: 'cowrite:summon' }, async ($, e, next) => {
     const [id = '', ...rest] = e.args.trim().split(/\s+/)
     const party = partyPersonas((await findPaper($))?.party ?? [])
     const persona = personaById(id)
     if (id === '' || persona === undefined) {
       const names = party.map(p => p.id).join(', ')
-      return { text: `${id === '' ? '' : `Unknown persona "${id}". `}Usage: /cw:summon <persona> [file]. Your party: ${names}` }
+      return { text: `${id === '' ? '' : `Unknown persona "${id}". `}Usage: /cowrite:summon <persona> [file]. Your party: ${names}` }
     }
     return next({ ...e, args: `${persona.id} ${rest.join(' ')}`.trim() })
   }).catch(commandFailed)
@@ -849,9 +849,9 @@ export const register: Register = (on, options) => {
         </Text>
       )
     }
-    if (origin.kind === 'plugin' && origin.name === 'cw') {
-      const summoned = /cw:([a-z0-9-]+) agent to review (.*?)\. Relay/.exec(e.props.text)
-      const asked = /cw:([a-z0-9-]+) agent to answer my question: "(.*)"\. It may/.exec(e.props.text)
+    if (origin.kind === 'plugin' && origin.name === 'cowrite') {
+      const summoned = /cowrite:([a-z0-9-]+) agent to review (.*?)\. Relay/.exec(e.props.text)
+      const asked = /cowrite:([a-z0-9-]+) agent to answer my question: "(.*)"\. It may/.exec(e.props.text)
       const briefing = /^Brief (.+?) for this paper\./.exec(e.props.text)
       if (briefing) return <Text dimColor>📋 Briefing {briefing[1]}</Text>
       const creating = /^Add "([^"]+)" to my review party/.exec(e.props.text)

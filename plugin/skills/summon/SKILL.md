@@ -5,6 +5,6 @@ argument-hint: "<persona> [file or section]"
 disable-model-invocation: true
 ---
 
-The first word of `$ARGUMENTS` is a persona id of the paper's review party (the plugin has checked it; `/cw:party` lists them). The rest names the file or section to review; empty, it is the section the author is working on (ask which, if unclear).
+The first word of `$ARGUMENTS` is a persona id of the paper's review party (the plugin has checked it; `/cowrite:party` lists them). The rest names the file or section to review; empty, it is the section the author is working on (ask which, if unclear).
 
-Use the `cw:<persona>` agent to review it. Relay its hints and questions as given, without rewritten text.
+Use the `cowrite:<persona>` agent to review it. Relay its hints and questions as given, without rewritten text.

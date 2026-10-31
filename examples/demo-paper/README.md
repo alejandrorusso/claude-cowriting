@@ -10,9 +10,9 @@ claude
 ```
 
 Then try:
-- `/cw:pane` opens the pane: the review party, live hints, the AI log, the scope and your progress.
-- `/cw:summon reviewer-2 manuscript/main.md` asks Reviewer #2 for a review.
-- `/cw:scope` shows the progress against `scope.md`, and `/cw:scope check` asks which planned points the text makes.
-- `/cw:watch` starts live review: edit `manuscript/main.md`, pause, and hints appear above the prompt.
+- `/cowrite:pane` opens the pane: the review party, live hints, the AI log, the scope and your progress.
+- `/cowrite:summon reviewer-2 manuscript/main.md` asks Reviewer #2 for a review.
+- `/cowrite:scope` shows the progress against `scope.md`, and `/cowrite:scope check` asks which planned points the text makes.
+- `/cowrite:watch` starts live review: edit `manuscript/main.md`, pause, and hints appear above the prompt.
 
 Autosave is off for this demo (`"autosave": false` in `paper.json`), because the folder sits inside the plugin's own repository. Your own papers commit as usual.

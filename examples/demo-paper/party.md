@@ -3,8 +3,8 @@
 <!-- You write this file. It tells each persona what to look for in THIS project.
      Whenever a persona reviews (summoned, asked, or in live review), the plugin hands it
      the "everyone" section and its own section. Empty sections are skipped.
-     Edit it any time, or let a persona interview you: /cw:brief <persona>.
-     Set a brief in one line: /cw:brief <persona> <what to look for>. -->
+     Edit it any time, or let a persona interview you: /cowrite:brief <persona>.
+     Set a brief in one line: /cowrite:brief <persona> <what to look for>. -->
 
 ## everyone — the whole party
 <!-- Field and subfield, kind of text (thesis, article, report), target journal or examiner, audience, style guide (e.g. APA 7, Vancouver), US or British English, what stage the draft is in. -->

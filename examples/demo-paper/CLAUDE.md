@@ -30,4 +30,4 @@ This is a writing workspace of the **CoWriting** plugin. The human author writes
 | `notes/ai/` | Claude | marked AI notes |
 | `ai-log/` | plugin + author's annotations | append-only log of every AI interaction |
 | `scope.md` | author (Claude may write down the author's own answers) | the plan: goal, points, targets, sections, deadline |
-| `disclosure/` | `/cw:disclosure` | AI register for the declaration |
+| `disclosure/` | `/cowrite:disclosure` | AI register for the declaration |

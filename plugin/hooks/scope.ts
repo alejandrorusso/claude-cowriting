@@ -1,7 +1,7 @@
 // The scope: what the author plans for the paper (scope.md, their words) and
 // how far the manuscript has come. Words, figures, tables, references and
 // open markers are counted without AI; whether the planned points are made is
-// judged by a small model on request (/cw:scope check), logged like any AI input.
+// judged by a small model on request (/cowrite:scope check), logged like any AI input.
 
 import type { EngineInterface } from 'claude-code'
 
@@ -338,10 +338,10 @@ export async function measureScope($: $, paper: Paper, today: string): Promise<S
   return scopeProgress(plan, await readTextFiles($, paper), check?.points ?? {}, check?.ts, today)
 }
 
-/** /cw:scope check: which points the text makes. Logged; resolves a one-line summary. */
+/** /cowrite:scope check: which points the text makes. Logged; resolves a one-line summary. */
 export async function checkPoints($: $, paper: Paper, model: string): Promise<string> {
   const plan = await readPlan($, paper.root)
-  if (plan === null || plan.points.length === 0) return 'No points in scope.md yet: add them under "## Points", or run /cw:scope edit.'
+  if (plan === null || plan.points.length === 0) return 'No points in scope.md yet: add them under "## Points", or run /cowrite:scope edit.'
   const files = await readTextFiles($, paper)
   if (files.every(f => f.text.trim() === '')) return 'The manuscript is still empty: nothing to check yet.'
   const list = plan.points.map((p, i) => `${i + 1}. ${p.text}${p.section ? ` (planned for: ${p.section})` : ''}`).join('\n')
@@ -385,5 +385,5 @@ export async function checkPoints($: $, paper: Paper, model: string): Promise<st
   await $.fs.write(join(paper.root, CHECK_FILE), `${JSON.stringify({ ts, model, points } satisfies CheckFile, null, 2)}\n`)
   const covered = results.filter(r => r.status === 'covered').length
   const partial = results.filter(r => r.status === 'partial').length
-  return `🎯 Points: ${covered} covered, ${partial} partial, ${plan.points.length - covered - partial} missing · details in the Scope tab (/cw:pane scope)`
+  return `🎯 Points: ${covered} covered, ${partial} partial, ${plan.points.length - covered - partial} missing · details in the Scope tab (/cowrite:pane scope)`
 }

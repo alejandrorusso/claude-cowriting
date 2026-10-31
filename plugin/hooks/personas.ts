@@ -3,7 +3,7 @@
 // plugin/agents/<id>.md and a 12x12 sprite drawn from a palette ('.' is
 // transparent; the shared palette is extended by each persona's own colours).
 // The author picks the members of their paper's party from it and adds
-// experts of their own as party/<id>.md files, registered as cw:<id> agents
+// experts of their own as party/<id>.md files, registered as cowrite:<id> agents
 // when the paper is opened.
 
 export type Persona = {
@@ -285,7 +285,7 @@ export const setCustomPersonas = (list: readonly Persona[]): void => {
 export const customPersonas = (): Persona[] => [...customs.values()]
 
 export const personaById = (id: string): Persona | undefined => {
-  const key = id.replace(/^(cw|cowriting):/, '')
+  const key = id.replace(/^(cowrite|cw|cowriting):/, '')
   return PERSONAS.find(p => p.id === key) ?? customs.get(key)
 }
 
@@ -358,7 +358,7 @@ Start with one line in character (your voice), then:
 1. **Top 3 issues** (most important first): location, what you noticed, why it matters, a guiding question or hint.
 2. **Further observations** (short bullet list, optional).
 3. **Questions for the author** (1–3).
-End with: \`→ Annotate this with /cw:annotate (adopted / adapted / rejected / info).\``
+End with: \`→ Annotate this with /cowrite:annotate (adopted / adapted / rejected / info).\``
 
 /** What a custom persona may call: it reads and searches, like the catalogue's reviewers. */
 export const CUSTOM_TOOLS: readonly string[] = ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch']
@@ -395,7 +395,7 @@ export const parsePersonaFile = (id: string, text: string): CustomPersona | null
 export const customDescription = (p: Persona): string =>
   `${p.name}, a member of the author's review party: ${p.role}. Use when the author wants this perspective on their text; it gives located hints and questions, never text.`
 
-/** A party/<id>.md skeleton for a new expert, for /cw:party new and the init skill. */
+/** A party/<id>.md skeleton for a new expert, for /cowrite:party new and the init skill. */
 export const personaFileSkeleton = (id: string, name: string, role: string): string =>
   [
     '---',

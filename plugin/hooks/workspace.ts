@@ -1,6 +1,6 @@
 // Reading and writing the paper workspace through `$.fs`. A workspace is a
 // folder holding paper.json, or a folder whose .active-project names one of
-// its projects/<name>/ papers. /cw:paper <path> can also point the session at
+// its projects/<name>/ papers. /cowrite:paper <path> can also point the session at
 // a paper folder anywhere, so Claude Code can run from any folder.
 
 import { atom, read, update } from 'claude-code'
@@ -42,8 +42,8 @@ const asPaper = (root: string, json: PaperJson): Paper => ({
   autosave: json.autosave !== false,
 })
 
-/** A paper folder chosen with /cw:paper <path>; null: the session's folder decides. */
-const paperRootAtom = atom({ plugin: 'cw', key: 'paperRoot' } as const, null as string | null)
+/** A paper folder chosen with /cowrite:paper <path>; null: the session's folder decides. */
+const paperRootAtom = atom({ plugin: 'cowrite', key: 'paperRoot' } as const, null as string | null)
 
 const RECENT_KEY = 'recentPapers'
 const KEEP_RECENT = 8
@@ -96,7 +96,7 @@ export async function readCustomPersonas($: $, root: string): Promise<{ experts:
 
 /**
  * Reads the paper's experts, makes them known to the pane and the commands, and registers each as a
- * cw:<id> agent type the model can dispatch from the next turn on; one already registered with the
+ * cowrite:<id> agent type the model can dispatch from the next turn on; one already registered with the
  * same prompt is left alone. Returns the ids of files that are not a persona.
  */
 export async function loadParty($: $, root: string): Promise<string[]> {
@@ -184,7 +184,7 @@ export async function readText($: $, path: string): Promise<string> {
 }
 
 /**
- * /cw:paper upgrade [apply]: what a workspace from an earlier plugin version lacks,
+ * /cowrite:paper upgrade [apply]: what a workspace from an earlier plugin version lacks,
  * listed by the scaffold tool; with apply, made. Runs on the host, not as a tool call,
  * so the guard neither refuses it (the author asked) nor records it as a detected change.
  */
@@ -194,7 +194,7 @@ export async function upgradePaper($: $, root: string, isApply: boolean): Promis
   if (run.exitCode !== 0) return `Upgrade failed:\n${(run.stderr || run.stdout).trim()}`
   const report = run.stdout.trim()
   if (isApply || report.endsWith('nothing to do.')) return report
-  return `${report}\nApply with /cw:paper upgrade apply. Your CLAUDE.md is kept under .cowriting/upgrade/ if it is replaced.`
+  return `${report}\nApply with /cowrite:paper upgrade apply. Your CLAUDE.md is kept under .cowriting/upgrade/ if it is replaced.`
 }
 
 /** Folders never compared: git's own, and dependencies a build may pull in. */
@@ -276,7 +276,7 @@ export async function setActiveProject($: $, name: string): Promise<string> {
   const cwd = await $.session.cwd()
   const root = join(cwd, 'projects', name)
   if (!(await $.fs.exists(join(root, 'paper.json')))) {
-    return `No paper "${name}" under projects/. Create one with /cw:init.`
+    return `No paper "${name}" under projects/. Create one with /cowrite:init.`
   }
   await $.fs.write(join(cwd, '.active-project'), `${name}\n`)
   await update($, paperRootAtom, () => null)
@@ -302,14 +302,14 @@ async function kindOf($: $, path: string): Promise<'file' | 'dir' | 'other' | 'n
 }
 
 /**
- * /cw:paper <arg>: a number picks a recent paper, a bare name one under
+ * /cowrite:paper <arg>: a number picks a recent paper, a bare name one under
  * projects/, anything else is a path to a paper folder (or a file in it).
  */
 export async function openPaper($: $, arg: string): Promise<string> {
   const recent = await recentPapers($)
   if (/^\d+$/.test(arg)) {
     const pick = recent[Number(arg) - 1]
-    if (pick === undefined) return `No recent paper #${arg}. /cw:paper lists them.`
+    if (pick === undefined) return `No recent paper #${arg}. /cowrite:paper lists them.`
     arg = pick
   }
   const isName = !/[\/~]/.test(arg) && arg !== '.' && arg !== '..'
@@ -322,7 +322,7 @@ export async function openPaper($: $, arg: string): Promise<string> {
   if (kind === 'file') root = root.replace(/\/[^/]+$/, '') || '/'
   const json = await readJson<PaperJson>($, join(root, 'paper.json'))
   if (json === undefined) {
-    return `${root} is not a CoWriting paper yet. Set it up there with /cw:init ${root}`
+    return `${root} is not a CoWriting paper yet. Set it up there with /cowrite:init ${root}`
   }
   await update($, paperRootAtom, () => root)
   await $.store.set(RECENT_KEY, [root, ...recent.filter(r => r !== root)].slice(0, KEEP_RECENT)).catch(() => undefined)
@@ -330,7 +330,7 @@ export async function openPaper($: $, arg: string): Promise<string> {
 }
 
 /**
- * /cw:init <path>: the session works on that folder from now on, so the
+ * /cowrite:init <path>: the session works on that folder from now on, so the
  * workspace the skill scaffolds there is the active paper once it exists.
  */
 export async function targetFolder($: $, arg: string): Promise<string | null> {
@@ -342,13 +342,13 @@ export async function targetFolder($: $, arg: string): Promise<string | null> {
   return root
 }
 
-/** /cw:paper without arguments: the active paper and the recent ones. */
+/** /cowrite:paper without arguments: the active paper and the recent ones. */
 export async function describePapers($: $): Promise<string> {
   const paper = await findPaper($)
   const recent = await recentPapers($)
   const lines = [paper === null ? 'No active paper.' : `Active paper: ${paper.name} · ${paper.root}`]
   if (recent.length > 0) lines.push('Recent:', ...recent.map((r, i) => `  ${i + 1}  ${r}`))
-  lines.push('Switch with /cw:paper <path | number | project name>.')
+  lines.push('Switch with /cowrite:paper <path | number | project name>.')
   return lines.join('\n')
 }
 

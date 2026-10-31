@@ -31,7 +31,7 @@ export const IDLE_WATCH: WatchState = {
   isHidden: false,
 }
 
-export const watchAtom = atom({ plugin: 'cw', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
+export const watchAtom = atom({ plugin: 'cowrite', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
 
 // What this module has seen of the manuscript; a reload starts a new baseline.
 const seen = {

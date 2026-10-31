@@ -1,7 +1,7 @@
 # Scope
 
 <!-- Demo scope for the fictional example paper. In your own paper this file holds your plan, in your words.
-     /cw:scope shows the progress against it, /cw:scope check asks which points the text already makes. -->
+     /cowrite:scope shows the progress against it, /cowrite:scope check asks which points the text already makes. -->
 
 ## Goal
 Readers should know whether a ten-minute walking break is worth testing in a full trial with university students.

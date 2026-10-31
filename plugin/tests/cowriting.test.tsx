@@ -70,7 +70,7 @@ const workspace = (on: any, files: Map<string, string>) => {
   registered.length = 0
   on('agent.register', (_: unknown, e: { name: string; prompt: string; tools: string[] }) => {
     registered.push(e)
-    return { value: { agent: `cw:${e.name}` } }
+    return { value: { agent: `cowrite:${e.name}` } }
   })
   on('session.start', (_: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
 }
@@ -196,11 +196,11 @@ test('words are counted without LaTeX and Markdown syntax', async () => {
 })
 
 test('categories come from skills and summoned personas', async () => {
-  expect(categoryFor('cw:language', 'intro')).toBe('language')
-  expect(categoryFor('cw:annotate', '')).toBe('meta')
-  expect(categoryFor(undefined, 'Use the cw:statistics-nerd agent to review x')).toBe('methods')
+  expect(categoryFor('cowrite:language', 'intro')).toBe('language')
+  expect(categoryFor('cowrite:annotate', '')).toBe('meta')
+  expect(categoryFor(undefined, 'Use the cowrite:statistics-nerd agent to review x')).toBe('methods')
   expect(categoryFor('summon', 'style-coach manuscript/main.md')).toBe('style')
-  expect(categoryFor(undefined, 'Use the cw:terminologist agent to review x')).toBe('terminology')
+  expect(categoryFor(undefined, 'Use the cowrite:terminologist agent to review x')).toBe('terminology')
   expect(categoryFor(undefined, 'what is a p-value?')).toBe('general')
 })
 
@@ -364,8 +364,8 @@ test('a summoned persona is counted once, and its hand-back is logged as its tur
     tool_use_id: 'tu-1',
     prompt: 'review',
     description: 'terms',
-    subagentType: 'cw:terminologist',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:terminologist',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -413,7 +413,7 @@ test('live review sees only changed paragraphs and keeps at most three hints', a
   expect(parseHints('no JSON here', ['terminologist']).length).toBe(0)
 })
 
-test('/cw:watch reviews after a writing pause, logs it, and shows the hints', async ($, on) => {
+test('/cowrite:watch reviews after a writing pause, logs it, and shows the hints', async ($, on) => {
   const files = paperFiles()
   const mtimes = new Map<string, number>([[`${ROOT}/manuscript/main.tex`, 1]])
   workspace(on, files)
@@ -431,7 +431,7 @@ test('/cw:watch reviews after a writing pause, logs it, and shows the hints', as
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
 
-  const started = await $.command.run({ command: 'cw:watch', args: 'on', origin: { kind: 'composer' }, presentation })
+  const started = await $.command.run({ command: 'cowrite:watch', args: 'on', origin: { kind: 'composer' }, presentation })
   expect(started.text).toContain('Terminologist')
   await clock.advance(5_000) // first look: the baseline
 
@@ -449,7 +449,7 @@ test('/cw:watch reviews after a writing pause, logs it, and shows the hints', as
   expect(computeStats(entries, new Date()).unannotated).toBe(0) // live hints don't nag
 
   const ui = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'AbovePrompt',
     surface: 'terminal',
     props: { hasSurvey: false } as never,
@@ -457,7 +457,7 @@ test('/cw:watch reviews after a writing pause, logs it, and shows the hints', as
   expect(await ui.find({ type: 'Text', text: /subjects → participants/ })).toBeDefined()
   await ui.unmount()
 
-  const stopped = await $.command.run({ command: 'cw:watch', args: 'off', origin: { kind: 'composer' }, presentation })
+  const stopped = await $.command.run({ command: 'cowrite:watch', args: 'off', origin: { kind: 'composer' }, presentation })
   expect(stopped.text).toContain('stopped')
 })
 
@@ -469,7 +469,7 @@ test('summoning from the pane counts the persona on its card', async ($, on) => 
   on('agent.spawn', () => ({ model: 'm', agentId: 'agent-3' }))
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const pane = {
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'Pane',
     requestId: 'cowriting',
     surface: 'terminal',
@@ -483,8 +483,8 @@ test('summoning from the pane counts the persona on its card', async ($, on) => 
     tool_use_id: 'tu-3',
     prompt: 'review',
     description: 'structure',
-    subagentType: 'cw:architect',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:architect',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -522,11 +522,11 @@ test('the usage meter shows tokens and limits, and warns once a window crosses 8
   expect(limitCrossed(usage.limits, usage.limits)).toBeUndefined()
 })
 
-test('calm shows Claude Code steps as one line, focus hides them, /cw:quiet switches', async ($, on) => {
+test('calm shows Claude Code steps as one line, focus hides them, /cowrite:quiet switches', async ($, on) => {
   workspace(on, paperFiles())
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const bash = {
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'ToolUse',
     surface: 'terminal',
     props: {
@@ -543,7 +543,7 @@ test('calm shows Claude Code steps as one line, focus hides them, /cw:quiet swit
   await calm.unmount()
 
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const switched = await $.command.run({ command: 'cw:quiet', args: 'focus', origin: { kind: 'composer' }, presentation })
+  const switched = await $.command.run({ command: 'cowrite:quiet', args: 'focus', origin: { kind: 'composer' }, presentation })
   expect(switched.text).toContain('Focus: focus')
   const focus = await $.ui.mount(bash)
   expect(await focus.find({ type: 'Text', text: /Read references/ })).toBeUndefined()
@@ -553,7 +553,7 @@ test('calm shows Claude Code steps as one line, focus hides them, /cw:quiet swit
 test('the Log tab says who said what, before you classify it', async ($, on) => {
   const files = paperFiles()
   const log = [
-    { type: 'prompt', id: 'p1', ts: '2026-10-29T08:00:00Z', session: 's', paper: 'demo', category: 'structure', command: 'summon', text: 'Use the cw:architect agent to review x.' },
+    { type: 'prompt', id: 'p1', ts: '2026-10-29T08:00:00Z', session: 's', paper: 'demo', category: 'structure', command: 'summon', text: 'Use the cowrite:architect agent to review x.' },
     { type: 'response', ref: 'p1', ts: '2026-10-29T08:00:05Z', model: 'm', personas: ['architect'], agents: { a1: 'architect' }, tools_used: [], ai_text_flag: false, answer: 'The Architect is on it.' },
     { type: 'prompt', id: 'p2', ts: '2026-10-29T08:02:00Z', session: 's', paper: 'demo', category: 'structure', origin: 'agent', agent: 'architect', text: '<agent-message from="a1">…</agent-message>' },
     { type: 'response', ref: 'p2', ts: '2026-10-29T08:02:09Z', model: 'm', personas: ['architect'], tools_used: [], ai_text_flag: false, answer: '**Top issue:** the red thread breaks at l. 12 — why does the method come before the gap?' },
@@ -567,7 +567,7 @@ test('the Log tab says who said what, before you classify it', async ($, on) => 
   expect(stats.open[0]?.persona).toBe('architect')
 
   const ui = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'Pane',
     requestId: 'cowriting',
     surface: 'terminal',
@@ -608,7 +608,7 @@ test('party.md briefs are read by section, and setting one keeps the rest', asyn
   expect(parseBriefs(setBrief(updated, 'style-coach', 'First person plural.'))['style-coach']).toBe('First person plural.')
 })
 
-test('a persona gets its brief with its task, and /cw:brief sets one', async ($, on) => {
+test('a persona gets its brief with its task, and /cowrite:brief sets one', async ($, on) => {
   const files = paperFiles()
   files.set(`${ROOT}/party.md`, '## everyone\nThesis in sleep medicine.\n\n## architect — The Architect\nIMRaD, 8000 words.\n')
   workspace(on, files)
@@ -622,8 +622,8 @@ test('a persona gets its brief with its task, and /cw:brief sets one', async ($,
     tool_use_id: 'tu-5',
     prompt: 'Review the structure.',
     description: 'structure',
-    subagentType: 'cw:architect',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:architect',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -633,10 +633,10 @@ test('a persona gets its brief with its task, and /cw:brief sets one', async ($,
   expect(task).toContain('Thesis in sleep medicine.')
 
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const saved = await $.command.run({ command: 'cw:brief', args: 'terminologist ICD-11 terms only', origin: { kind: 'composer' }, presentation })
+  const saved = await $.command.run({ command: 'cowrite:brief', args: 'terminologist ICD-11 terms only', origin: { kind: 'composer' }, presentation })
   expect(saved.text).toContain('saved')
   expect(parseBriefs(files.get(`${ROOT}/party.md`)!).terminologist).toBe('ICD-11 terms only')
-  const listed = await $.command.run({ command: 'cw:brief', args: '', origin: { kind: 'composer' }, presentation })
+  const listed = await $.command.run({ command: 'cowrite:brief', args: '', origin: { kind: 'composer' }, presentation })
   expect(listed.text).toContain('📋 terminologist: ICD-11 terms only')
 })
 
@@ -651,8 +651,8 @@ test('a persona at work is one progress row, and its report one line', async ($,
     tool_use_id: 'tu-9',
     prompt: 'review',
     description: 'terms',
-    subagentType: 'cw:terminologist',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:terminologist',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -661,13 +661,13 @@ test('a persona at work is one progress row, and its report one line', async ($,
   await $.tool.call({ tool: 'Grep', pattern: 'subjects', agentId: 'agent-9' } as never)
 
   const row = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'ToolUse',
     surface: 'terminal',
     props: {
       tool_use_id: 'tu-9',
       tool: 'Agent',
-      input: { subagent_type: 'cw:terminologist' },
+      input: { subagent_type: 'cowrite:terminologist' },
       isRunning: true,
       isErrored: false,
       isInterrupted: false,
@@ -677,7 +677,7 @@ test('a persona at work is one progress row, and its report one line', async ($,
   await row.unmount()
 
   const report = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'UserMessage',
     surface: 'terminal',
     props: { text: 'a long report', origin: { kind: 'task-notification' }, isExpanded: false, task: { toolUseId: 'tu-9' } } as never,
@@ -709,7 +709,7 @@ test('an expert of the author\'s own is read from party/<id>.md', async () => {
   expect(parsePersonaFile('neurologist', 'no frontmatter')).toBeNull()
   expect(parsePersonaFile('neurologist', '---\nname: X\n---\n')).toBeNull() // no role, no body
   expect(parsePersonaFile('reviewer-2', file)).toBeNull()
-  // the skeleton /cw:party new writes is itself a persona, so the agent exists while the author fills it in
+  // the skeleton /cowrite:party new writes is itself a persona, so the agent exists while the author fills it in
   const skeleton = parsePersonaFile('ontologist', personaFileSkeleton('ontologist', 'The Ontologist', 'Ontologies, OWL, reasoning'))!
   expect(skeleton.persona.name).toBe('The Ontologist')
   expect(skeleton.persona.role).toBe('Ontologies, OWL, reasoning')
@@ -718,7 +718,7 @@ test('an expert of the author\'s own is read from party/<id>.md', async () => {
   expect(DEFAULT_PARTY.length).toBe(PERSONAS.length - 1)
 })
 
-test('the party is the roster in paper.json plus the experts in party/, and /cw:party changes it', async ($, on) => {
+test('the party is the roster in paper.json plus the experts in party/, and /cowrite:party changes it', async ($, on) => {
   const files = paperFiles()
   files.set(`${ROOT}/paper.json`, JSON.stringify({ name: 'demo', format: 'latex', language: 'en', party: ['reviewer-2', 'architect'] }))
   files.set(
@@ -745,14 +745,14 @@ test('the party is the roster in paper.json plus the experts in party/, and /cw:
 
   // the model is offered the members only
   const offer = (agent: string) =>
-    $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'cw', tier: 'user' } as never })
-  expect((await offer('cw:reviewer-2')).isOffered).toBe(true)
-  expect((await offer('cw:neurologist')).isOffered).toBe(true)
-  expect((await offer('cw:grammar-guy')).isOffered).toBe(false)
+    $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'cowrite', tier: 'user' } as never })
+  expect((await offer('cowrite:reviewer-2')).isOffered).toBe(true)
+  expect((await offer('cowrite:neurologist')).isOffered).toBe(true)
+  expect((await offer('cowrite:grammar-guy')).isOffered).toBe(false)
   expect((await offer('Explore')).isOffered).toBe(true)
 
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const listed = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  const listed = await $.command.run({ command: 'cowrite:party', args: '', origin: { kind: 'composer' }, presentation })
   expect(listed.text).toContain('Your review party (3)')
   expect(listed.text).toContain('★ neurologist · The Neurologist: Clinical neurology')
   expect(listed.text).toContain('✓ reviewer-2')
@@ -761,7 +761,7 @@ test('the party is the roster in paper.json plus the experts in party/, and /cw:
   expect(listed.text).toContain('Not a persona (missing name, role or text): party/notes.md')
 
   const ui = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'Pane',
     requestId: 'cowriting',
     surface: 'terminal',
@@ -777,8 +777,8 @@ test('the party is the roster in paper.json plus the experts in party/, and /cw:
     tool_use_id: 'tu-11',
     prompt: 'Review the discussion.',
     description: 'neurology',
-    subagentType: 'cw:neurologist',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:neurologist',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -786,29 +786,29 @@ test('the party is the roster in paper.json plus the experts in party/, and /cw:
   expect(task).toContain('NIHSS and mRS conventions.')
   expect(task).toContain('Stroke unit thesis.')
 
-  const added = await $.command.run({ command: 'cw:party', args: 'add grammar-guy clinician', origin: { kind: 'composer' }, presentation })
+  const added = await $.command.run({ command: 'cowrite:party', args: 'add grammar-guy clinician', origin: { kind: 'composer' }, presentation })
   expect(added.text).toBe('Grammar Guy, The Clinician joined the party.')
   expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).party).toEqual(['reviewer-2', 'architect', 'grammar-guy', 'clinician'])
   expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).name).toBe('demo')
-  expect((await offer('cw:grammar-guy')).isOffered).toBe(true)
-  const removed = await $.command.run({ command: 'cw:party', args: 'remove clinician', origin: { kind: 'composer' }, presentation })
+  expect((await offer('cowrite:grammar-guy')).isOffered).toBe(true)
+  const removed = await $.command.run({ command: 'cowrite:party', args: 'remove clinician', origin: { kind: 'composer' }, presentation })
   expect(removed.text).toBe('The Clinician left the party.')
   expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).party).toEqual(['reviewer-2', 'architect', 'grammar-guy'])
-  const unknown = await $.command.run({ command: 'cw:party', args: 'add doctor', origin: { kind: 'composer' }, presentation })
+  const unknown = await $.command.run({ command: 'cowrite:party', args: 'add doctor', origin: { kind: 'composer' }, presentation })
   expect(unknown.text).toContain('Not in the catalogue: doctor')
-  const retire = await $.command.run({ command: 'cw:party', args: 'remove neurologist', origin: { kind: 'composer' }, presentation })
+  const retire = await $.command.run({ command: 'cowrite:party', args: 'remove neurologist', origin: { kind: 'composer' }, presentation })
   expect(retire.text).toContain('delete party/<id>.md')
 
   // a new expert: the skeleton is written, then the skill interviews the author
-  const made = await $.command.run({ command: 'cw:party', args: 'new ontologist "The Ontologist" ontologies, OWL, reasoning', origin: { kind: 'composer' }, presentation })
-  expect(made.text).toBe('skill cw:party new ontologist "The Ontologist" ontologies, OWL, reasoning')
+  const made = await $.command.run({ command: 'cowrite:party', args: 'new ontologist "The Ontologist" ontologies, OWL, reasoning', origin: { kind: 'composer' }, presentation })
+  expect(made.text).toBe('skill cowrite:party new ontologist "The Ontologist" ontologies, OWL, reasoning')
   const skeleton = files.get(`${ROOT}/party/ontologist.md`)!
   expect(skeleton).toContain('name: The Ontologist')
   expect(skeleton).toContain('role: ontologies, OWL, reasoning')
-  const taken = await $.command.run({ command: 'cw:party', args: 'new reviewer-2', origin: { kind: 'composer' }, presentation })
+  const taken = await $.command.run({ command: 'cowrite:party', args: 'new reviewer-2', origin: { kind: 'composer' }, presentation })
   expect(taken.text).toContain('not a free id')
   // the skeleton counts from now on
-  const again = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  const again = await $.command.run({ command: 'cowrite:party', args: '', origin: { kind: 'composer' }, presentation })
   expect(again.text).toContain('★ ontologist · The Ontologist')
   expect(registered.map(r => r.name)).toEqual(['neurologist', 'ontologist'])
 })
@@ -822,30 +822,30 @@ test('typed commands that need the model hand on to their skill, checked', async
   const presentation = { isFullscreen: false, columns: 100 } as never
   const run = (command: string, args: string) => $.command.run({ command, args, origin: { kind: 'composer' }, presentation })
 
-  expect((await run('cw:summon', 'cw:neurologist discussion')).text).toBe('skill cw:summon neurologist discussion')
-  expect((await run('cw:summon', 'architect')).text).toBe('skill cw:summon architect')
-  expect((await run('cw:summon', 'doctor')).text).toContain('Unknown persona "doctor"')
-  expect((await run('cw:summon', '')).text).toContain('Your party: grammar-guy')
-  expect((await run('cw:ask', 'terminologist is "sleep architecture" usual?')).text).toBe('skill cw:ask terminologist is "sleep architecture" usual?')
-  expect((await run('cw:ask', 'terminologist')).text).toContain('Usage')
-  expect((await run('cw:brief', 'architect')).text).toBe('skill cw:brief architect — The Architect')
-  expect((await run('cw:brief', 'all')).text).toBe('skill cw:brief everyone — the whole party')
-  expect((await run('cw:brief', 'neurologist')).text).toBe('skill cw:brief neurologist — The Neurologist')
-  expect((await run('cw:scope', 'edit')).text).toBe('skill cw:scope edit')
-  expect((await run('cw:scope', 'fly')).text).toContain('Usage')
+  expect((await run('cowrite:summon', 'cowrite:neurologist discussion')).text).toBe('skill cowrite:summon neurologist discussion')
+  expect((await run('cowrite:summon', 'architect')).text).toBe('skill cowrite:summon architect')
+  expect((await run('cowrite:summon', 'doctor')).text).toContain('Unknown persona "doctor"')
+  expect((await run('cowrite:summon', '')).text).toContain('Your party: grammar-guy')
+  expect((await run('cowrite:ask', 'terminologist is "sleep architecture" usual?')).text).toBe('skill cowrite:ask terminologist is "sleep architecture" usual?')
+  expect((await run('cowrite:ask', 'terminologist')).text).toContain('Usage')
+  expect((await run('cowrite:brief', 'architect')).text).toBe('skill cowrite:brief architect — The Architect')
+  expect((await run('cowrite:brief', 'all')).text).toBe('skill cowrite:brief everyone — the whole party')
+  expect((await run('cowrite:brief', 'neurologist')).text).toBe('skill cowrite:brief neurologist — The Neurologist')
+  expect((await run('cowrite:scope', 'edit')).text).toBe('skill cowrite:scope edit')
+  expect((await run('cowrite:scope', 'fly')).text).toContain('Usage')
 })
 
 test('a paper.json from before rosters keeps its party: the pack\'s clinician included', async ($, on) => {
   workspace(on, paperFiles()) // domainPack: medicine
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const listed = await $.command.run({ command: 'cw:party', args: '', origin: { kind: 'composer' }, presentation })
+  const listed = await $.command.run({ command: 'cowrite:party', args: '', origin: { kind: 'composer' }, presentation })
   expect(listed.text).toContain(`Your review party (${PERSONAS.length})`)
   expect(listed.text).toContain('✓ clinician')
   expect(listed.text).not.toContain('Not in the party:')
 })
 
-test('/cw:paper upgrade lists what an older workspace lacks; `apply` makes the scaffold tool add it', async ($, on) => {
+test('/cowrite:paper upgrade lists what an older workspace lacks; `apply` makes the scaffold tool add it', async ($, on) => {
   workspace(on, paperFiles())
   const runs: (readonly string[])[] = []
   on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
@@ -857,9 +857,9 @@ test('/cw:paper upgrade lists what an older workspace lacks; `apply` makes the s
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
 
-  const dry = await $.command.run({ command: 'cw:paper', args: 'upgrade', origin: { kind: 'composer' }, presentation })
+  const dry = await $.command.run({ command: 'cowrite:paper', args: 'upgrade', origin: { kind: 'composer' }, presentation })
   expect(dry.text).toContain('party roster to add')
-  expect(dry.text).toContain('Apply with /cw:paper upgrade apply')
+  expect(dry.text).toContain('Apply with /cowrite:paper upgrade apply')
   const argv = runs.at(-1)!
   expect(argv[0]).toBe('python3')
   expect(argv[2]).toMatch(/tools\/new_paper\.py$/)
@@ -867,7 +867,7 @@ test('/cw:paper upgrade lists what an older workspace lacks; `apply` makes the s
   expect(argv).not.toContain('--apply')
   expect(argv.slice(-2)).toEqual(['--dir', ROOT])
 
-  const applied = await $.command.run({ command: 'cw:paper', args: 'upgrade apply', origin: { kind: 'composer' }, presentation })
+  const applied = await $.command.run({ command: 'cowrite:paper', args: 'upgrade apply', origin: { kind: 'composer' }, presentation })
   expect(applied.text).toContain('Upgraded.')
   expect(applied.text).not.toContain('Apply with')
   expect(runs.at(-1)).toContain('--apply')
@@ -914,7 +914,7 @@ test('the pane shows the review party on every surface', async ($, on) => {
 
   for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
     const ui = await $.ui.mount({
-      plugin: 'cw',
+      plugin: 'cowrite',
       component: 'Pane',
       requestId: 'cowriting',
       surface,
@@ -939,14 +939,14 @@ test('the pane shows the review party on every surface', async ($, on) => {
   }
 })
 
-test('/cw:pane <tab> opens the pane on that tab', async ($, on) => {
+test('/cowrite:pane <tab> opens the pane on that tab', async ($, on) => {
   workspace(on, paperFiles())
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const opened = await $.command.run({ command: 'cw:pane', args: 'log', origin: { kind: 'composer' }, presentation })
+  const opened = await $.command.run({ command: 'cowrite:pane', args: 'log', origin: { kind: 'composer' }, presentation })
   expect(opened.text).toContain('· log')
   const ui = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'Pane',
     requestId: 'cowriting',
     surface: 'terminal',
@@ -954,11 +954,11 @@ test('/cw:pane <tab> opens the pane on that tab', async ($, on) => {
   })
   expect(await ui.find({ type: 'Text', text: /AI turns/ })).toBeDefined()
   await ui.unmount()
-  const wrong = await $.command.run({ command: 'cw:pane', args: 'nonsense', origin: { kind: 'composer' }, presentation })
+  const wrong = await $.command.run({ command: 'cowrite:pane', args: 'nonsense', origin: { kind: 'composer' }, presentation })
   expect(wrong.text).toContain('Usage')
 })
 
-test('/cw:paper opens a paper by path from any folder and remembers it', async ($, on) => {
+test('/cowrite:paper opens a paper by path from any folder and remembers it', async ($, on) => {
   const elsewhere = '/home/u/papers/test'
   const files = new Map<string, string>([
     [`${elsewhere}/paper.json`, JSON.stringify({ name: 'test', format: 'markdown', language: 'en' })],
@@ -985,7 +985,7 @@ test('/cw:paper opens a paper by path from any folder and remembers it', async (
   })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const run = (args: string) => $.command.run({ command: 'cw:paper', args, origin: { kind: 'composer' }, presentation })
+  const run = (args: string) => $.command.run({ command: 'cowrite:paper', args, origin: { kind: 'composer' }, presentation })
 
   expect((await run('')).text).toContain('No active paper.')
   expect((await run('~/plain')).text).toContain('is not a CoWriting paper yet')
@@ -998,8 +998,8 @@ test('/cw:paper opens a paper by path from any folder and remembers it', async (
     tool_use_id: 'tu-7',
     prompt: 'Review the structure.',
     description: 'structure',
-    subagentType: 'cw:architect',
-    provider: { plugin: 'cw', tier: 'user' } as never,
+    subagentType: 'cowrite:architect',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
     parentModel: 'm',
     background: true,
     fork: false,
@@ -1133,7 +1133,7 @@ test('a point check answer is read defensively', async () => {
   expect(parseCheck('no json', 3)).toEqual([])
 })
 
-test('/cw:scope check asks the model, logs it, and the Scope tab shows the points', async ($, on) => {
+test('/cowrite:scope check asks the model, logs it, and the Scope tab shows the points', async ($, on) => {
   const files = paperFiles()
   files.set(`${ROOT}/scope.md`, SCOPE)
   workspace(on, files)
@@ -1151,17 +1151,17 @@ test('/cw:scope check asks the model, logs it, and the Scope tab shows the point
   mock.clock(on, { now: Date.parse('2026-10-29T10:00:00Z') })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
-  const checked = await $.command.run({ command: 'cw:scope', args: 'check', origin: { kind: 'composer' }, presentation })
+  const checked = await $.command.run({ command: 'cowrite:scope', args: 'check', origin: { kind: 'composer' }, presentation })
   expect(checked.text).toContain('1 covered, 0 partial, 2 missing')
   expect(system).toContain('never write, rephrase or suggest text')
   const log = parseLog([...files].filter(([k]) => k.startsWith(`${ROOT}/ai-log/`)).map(([, v]) => v).join('\n'))
   expect(log.some(e => e.type === 'prompt' && e.origin === 'scope' && e.category === 'structure')).toBe(true)
   expect(JSON.parse(files.get(`${ROOT}/.cowriting/scope-check.json`)!).points['Poor sleep raises next-day risk'].status).toBe('covered')
 
-  const shown = await $.command.run({ command: 'cw:scope', args: '', origin: { kind: 'composer' }, presentation })
+  const shown = await $.command.run({ command: 'cowrite:scope', args: '', origin: { kind: 'composer' }, presentation })
   expect(shown.text).toMatch(/^🎯 ≈ \d+ % · content \d+ % · finish \d+ %$/)
   const ui = await $.ui.mount({
-    plugin: 'cw',
+    plugin: 'cowrite',
     component: 'Pane',
     requestId: 'cowriting',
     surface: 'terminal',
@@ -1170,6 +1170,6 @@ test('/cw:scope check asks the model, logs it, and the Scope tab shows the point
   expect(await ui.find({ type: 'Text', text: /Points 2\/3/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /stated and cited/ })).toBeDefined()
   await ui.unmount()
-  const usage = await $.command.run({ command: 'cw:scope', args: 'nonsense', origin: { kind: 'composer' }, presentation })
+  const usage = await $.command.run({ command: 'cowrite:scope', args: 'nonsense', origin: { kind: 'composer' }, presentation })
   expect(usage.text).toContain('Usage')
 })

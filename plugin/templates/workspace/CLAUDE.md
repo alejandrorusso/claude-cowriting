@@ -30,7 +30,7 @@ This is a writing workspace of the **CoWriting** plugin. The human author writes
 | `literature/` | author; the bibliography exported by the reference manager (`.bib`, CSL JSON, RIS, PubMed `.nbib`) | references, model papers |
 | `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/` | author only | the rules, the party's briefing, the settings |
 | `notes/ai/` | Claude | marked AI notes |
-| `party/` | Claude, from the author's answers (`/cw:party new`); the author may edit | the author's own review experts, one `<id>.md` each; `paper.json` lists the catalogue members |
+| `party/` | Claude, from the author's answers (`/cowrite:party new`); the author may edit | the author's own review experts, one `<id>.md` each; `paper.json` lists the catalogue members |
 | `ai-log/` | plugin + author's annotations | append-only log of every AI interaction |
 | `scope.md` | author (Claude may write down the author's own answers) | the plan: goal, points, targets, sections, deadline |
-| `disclosure/` | `/cw:disclosure` | AI register for the declaration |
+| `disclosure/` | `/cowrite:disclosure` | AI register for the declaration |

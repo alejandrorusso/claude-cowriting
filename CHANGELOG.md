@@ -1,15 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### The plugin is now `cowrite`
+
+- The plugin's name changed from `cw` to `cowrite`, so every command is `/cowrite:<name>` and every persona is the `cowrite:<id>` agent. The old slug was two letters with no product word in it, which the plugin directory holds for a reviewer and never lets a listing change afterwards. Reinstall: `/plugin uninstall cw`, then `/plugin install cowrite --marketplace dozwa/claude-cowriting`. AI logs and party files from before keep working: a persona id with the old `cw:` prefix is still read.
+- A README inside the plugin folder, which is what the directory shows as the listing. The root README's privacy section now names what does reach the network: Crossref, Zotero on `localhost`, and web search when a persona looks for literature.
+
 ## 0.2.0 (2026-11-01)
 
 ### Upgrading a workspace from 0.1.0
 
-- New `/cw:paper upgrade`: lists what the active workspace lacks against the current templates (deny rules and sandbox paths in `.claude/settings.json`, the current `CLAUDE.md`, the party roster in `paper.json`, missing template files). `/cw:paper upgrade apply` adds them: settings are merged so the author's own rules stay, a replaced `CLAUDE.md` is kept under `.cowriting/upgrade/<time>/`, `party.md`, `scope.md` and the manuscript are never touched. The scaffold tool does the work (`new_paper.py --upgrade [--apply]`), started by the plugin on the host rather than as a tool call, so the guard neither refuses it nor records it as a detected change.
+- New `/cowrite:paper upgrade`: lists what the active workspace lacks against the current templates (deny rules and sandbox paths in `.claude/settings.json`, the current `CLAUDE.md`, the party roster in `paper.json`, missing template files). `/cowrite:paper upgrade apply` adds them: settings are merged so the author's own rules stay, a replaced `CLAUDE.md` is kept under `.cowriting/upgrade/<time>/`, `party.md`, `scope.md` and the manuscript are never touched. The scaffold tool does the work (`new_paper.py --upgrade [--apply]`), started by the plugin on the host rather than as a tool call, so the guard neither refuses it nor records it as a detected change.
 - Without the upgrade, a 0.1.0 workspace keeps working; it just lacks the `Edit` deny rules and the sandbox of 0.2.0.
 
 ### Pre-submission run
 
-- New `/cw:submit [target]`: the Integrity Guardian's check, the consistency report, open markers, the references against Crossref, the AI log's open turns and whether the disclosure is current, as one checklist with locations and the author's next step per item. It logs under the category `integrity`. Readiness is not judged; the findings are for the author.
+- New `/cowrite:submit [target]`: the Integrity Guardian's check, the consistency report, open markers, the references against Crossref, the AI log's open turns and whether the disclosure is current, as one checklist with locations and the author's next step per item. It logs under the category `integrity`. Readiness is not judged; the findings are for the author.
 
 ### Bibliographies from any reference manager
 
@@ -26,11 +33,11 @@
 
 The medicine domain pack is gone; every paper composes its own party instead.
 
-- `/cw:init` asks who joins: the nine general personas, The Clinician for medical texts, and any expert of the author's own. `paper.json` keeps the roster (`party`); a `paper.json` from before keeps its party, the clinician included where the pack was medicine.
-- An expert the catalogue lacks is a `party/<id>.md` file: frontmatter (`name`, `short`, `role`, `category`, `colour`), then its perspective and voice. The plugin appends the party's shared ground rules, registers it as the `cw:<id>` agent with read-only tools, draws it in the pane, briefs it from `party.md` and levels it like the others. `/cw:party new <id> "<Name>" <role>` writes the skeleton and Claude interviews the author to fill it in; `party/` is one of Claude's places for that.
-- `/cw:party` lists the party, `add`/`remove` change the catalogue members. Only members are offered to the model, shown in the pane, and accepted by `/cw:summon`, `/cw:ask`, `/cw:brief` and `/cw:watch`.
+- `/cowrite:init` asks who joins: the nine general personas, The Clinician for medical texts, and any expert of the author's own. `paper.json` keeps the roster (`party`); a `paper.json` from before keeps its party, the clinician included where the pack was medicine.
+- An expert the catalogue lacks is a `party/<id>.md` file: frontmatter (`name`, `short`, `role`, `category`, `colour`), then its perspective and voice. The plugin appends the party's shared ground rules, registers it as the `cowrite:<id>` agent with read-only tools, draws it in the pane, briefs it from `party.md` and levels it like the others. `/cowrite:party new <id> "<Name>" <role>` writes the skeleton and Claude interviews the author to fill it in; `party/` is one of Claude's places for that.
+- `/cowrite:party` lists the party, `add`/`remove` change the catalogue members. Only members are offered to the model, shown in the pane, and accepted by `/cowrite:summon`, `/cowrite:ask`, `/cowrite:brief` and `/cowrite:watch`.
 - The *Domain pack* option is gone from the plugin's settings.
-- Fixed: `/cw:summon`, `/cw:ask`, `/cw:brief <persona>` (the interview) and `/cw:scope edit` typed as commands failed on current Claude Code builds, which refuse a prompt submitted from inside a command's hook. The hook now checks the arguments and hands the command on to its skill text, which the model runs; the log entry comes from the command itself. The pane's buttons are unchanged.
+- Fixed: `/cowrite:summon`, `/cowrite:ask`, `/cowrite:brief <persona>` (the interview) and `/cowrite:scope edit` typed as commands failed on current Claude Code builds, which refuse a prompt submitted from inside a command's hook. The hook now checks the arguments and hands the command on to its skill text, which the model runs; the log entry comes from the command itself. The pane's buttons are unchanged.
 
 ### The author's files, not only the manuscript
 
@@ -38,7 +45,7 @@ Inside a paper, Claude now writes only in its own places: `notes/ai/`, `ai-log/`
 
 - The hook refuses file tools and shell writes for any of the author's files in the paper (`literature/`, `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/`, …), not only `manuscript/`, and names the file in its refusal. A `manuscript` folder stays refused wherever it is.
 - The shell pattern treats the folder's name as a path only (`manuscript/`, `"manuscript"`), no longer as any word: a `grep` for the word is not refused any more.
-- The workspace's `.claude/settings.json` (from `/cw:init`) now carries `Edit` deny rules for all of the author's files and turns on Claude Code's Bash sandbox with those paths on its write deny list, so the operating system refuses what the patterns cannot see. The network allow list keeps `verify_refs.py` and, on macOS, the Zotero search working. In the `projects/<name>/` layout the rules are merged into the workspace root's settings, where Claude Code reads them.
+- The workspace's `.claude/settings.json` (from `/cowrite:init`) now carries `Edit` deny rules for all of the author's files and turns on Claude Code's Bash sandbox with those paths on its write deny list, so the operating system refuses what the patterns cannot see. The network allow list keeps `verify_refs.py` and, on macOS, the Zotero search working. In the `projects/<name>/` layout the rules are merged into the workspace root's settings, where Claude Code reads them.
 - The comparison after a writing tool covers all of the author's files. The disclosure lists the manuscript changes; `ailog.py stats` counts both.
 - The three personas with a Write tool are told it is for `notes/ai/` only. Nothing could be trimmed from the tool lists: each one is used by a tool script or a note.
 
@@ -55,7 +62,7 @@ Every tab was rendered at 48, 80 and 120 columns through the test harness and re
 - The reminder band says "Did you use this in your text?" next to the quoted answer, so the four buttons clearly belong to it and not to the guard nudge above.
 - Times are the author's local clock everywhere (log, cards, scope check, live status), not UTC.
 - "1 answer", "2 hints", "3 days" instead of "answer(s)", "hint(s)", "day(s)".
-- `/cw:pane` lists `scope` among its tabs.
+- `/cowrite:pane` lists `scope` among its tabs.
 
 ## 0.1.0 (2026-10-31)
 
