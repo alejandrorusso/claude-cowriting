@@ -59,7 +59,7 @@ import {
   writeParty,
 } from './workspace'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const PANE = 'cowriting'
 const CONTRACT_SECTION = 'cowriting-contract'
@@ -133,7 +133,7 @@ const spawned = new Map<string, string>()
 let watchTimer: { cancel: () => void } | null = null
 let autosaveTimer: { cancel: () => void } | null = null
 
-async function refresh($: $, cfg: Config, isTurnEnd = false, lastWasAiText = false): Promise<Snapshot> {
+async function refresh($: Engine, cfg: Config, isTurnEnd = false, lastWasAiText = false): Promise<Snapshot> {
   const found = await findPaper($)
   if (found === null) {
     await update($, snapshotAtom, () => EMPTY_SNAPSHOT)
@@ -171,7 +171,7 @@ async function refresh($: $, cfg: Config, isTurnEnd = false, lastWasAiText = fal
   return snapshot
 }
 
-async function showStatus($: $, cfg: Config): Promise<void> {
+async function showStatus($: Engine, cfg: Config): Promise<void> {
   const { paper, progress, stats, scope } = await read($, snapshotAtom)
   if (paper === null) return $.ui.status(undefined)
   const parts = [`✍ ${paper.name}`, 'assist-only']
@@ -183,7 +183,7 @@ async function showStatus($: $, cfg: Config): Promise<void> {
   $.ui.status(parts.join(' · '))
 }
 
-async function measure($: $, cfg: Config, next: Usage): Promise<void> {
+async function measure($: Engine, cfg: Config, next: Usage): Promise<void> {
   const before = await read($, usageAtom)
   await update($, usageAtom, () => next)
   const alert = cfg.meter === 'tokens+limits' ? limitCrossed(before.limits, next.limits) : undefined
@@ -191,11 +191,11 @@ async function measure($: $, cfg: Config, next: Usage): Promise<void> {
   await showStatus($, cfg)
 }
 
-async function focusMode($: $, cfg: Config): Promise<FocusMode> {
+async function focusMode($: Engine, cfg: Config): Promise<FocusMode> {
   return (await read($, focusAtom)) ?? cfg.focus
 }
 
-async function annotate($: $, cfg: Config, ref: string, use: string): Promise<void> {
+async function annotate($: Engine, cfg: Config, ref: string, use: string): Promise<void> {
   const snapshot = await read($, snapshotAtom)
   if (snapshot.paper === null) return
   const root = snapshot.paper.root
@@ -208,7 +208,7 @@ async function annotate($: $, cfg: Config, ref: string, use: string): Promise<vo
 }
 
 /** A change to the author's files during a tool call: logged, shown, and from then on in the disclosure. */
-async function reportGuard($: $, cfg: Config, paper: Paper, tool: string, input: string, files: string[]): Promise<void> {
+async function reportGuard($: Engine, cfg: Config, paper: Paper, tool: string, input: string, files: string[]): Promise<void> {
   await appendLog($, paper.root, {
     type: 'guard',
     ts: new Date().toISOString(),
@@ -225,7 +225,7 @@ async function reportGuard($: $, cfg: Config, paper: Paper, tool: string, input:
 }
 
 /** The plugin's version from its manifest, and the engine's, for the log. */
-async function readVersions($: $): Promise<{ plugin?: string; claude_code?: string }> {
+async function readVersions($: Engine): Promise<{ plugin?: string; claude_code?: string }> {
   const out: { plugin?: string; claude_code?: string } = {}
   try {
     const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: string }
@@ -243,7 +243,7 @@ async function readVersions($: $): Promise<{ plugin?: string; claude_code?: stri
  * every plugin's prompt.submit hook but this one's, so it opens its own turn here: that is where a
  * persona launched by it is counted.
  */
-async function submitAsAuthor($: $, cfg: Config, text: string, category: string, command: string): Promise<void> {
+async function submitAsAuthor($: Engine, cfg: Config, text: string, category: string, command: string): Promise<void> {
   const paper = await findPaper($)
   if (paper !== null) {
     const id = newId()
@@ -262,7 +262,7 @@ async function submitAsAuthor($: $, cfg: Config, text: string, category: string,
   void $.prompt.submit({ text })
 }
 
-async function summon($: $, cfg: Config, personaId: string, target: string): Promise<string> {
+async function summon($: Engine, cfg: Config, personaId: string, target: string): Promise<string> {
   const persona = personaById(personaId)
   if (persona === undefined) return `Unknown persona "${personaId}".`
   const what = target === '' ? 'the section I am currently working on (ask me which, if unclear)' : target
@@ -276,7 +276,7 @@ async function summon($: $, cfg: Config, personaId: string, target: string): Pro
 const KEEP_REVIEWS = 20
 
 /** /cowrite:party: who is in this paper's party, and the changes to it; `{ args }` hands a new expert to the skill's interview. */
-async function partyCommand($: $, cfg: Config, paper: Paper, verb: string, words: string[]): Promise<string | { args: string }> {
+async function partyCommand($: Engine, cfg: Config, paper: Paper, verb: string, words: string[]): Promise<string | { args: string }> {
   const broken = await loadParty($, paper.root).catch(() => [])
   const party = (await findPaper($))?.party ?? paper.party
   const members = partyPersonas(party)
@@ -332,7 +332,7 @@ const SCOPE_INTERVIEW =
   `into ${SCOPE_FILE} in my words, following its structure (## Goal, ## Targets, ## Sections, ## Points as "- [ ] …" lines) and ` +
   'keeping its comment lines. Do not add points of your own; you may ask whether something is missing. Show me the result.'
 
-async function scopeCommand($: $, cfg: Config, verb: string): Promise<string> {
+async function scopeCommand($: Engine, cfg: Config, verb: string): Promise<string> {
   const paper = await findPaper($)
   if (paper === null) return 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.'
   if (verb === 'check') {
@@ -353,7 +353,7 @@ async function scopeCommand($: $, cfg: Config, verb: string): Promise<string> {
   return `🎯 ≈ ${pct(scope.overall)} · content ${pct(scope.content)}${scope.finish === null ? '' : ` · finish ${pct(scope.finish)}`}`
 }
 
-async function stepReview($: $, agentId: string, step: string): Promise<void> {
+async function stepReview($: Engine, agentId: string, step: string): Promise<void> {
   await update($, reviewsAtom, all => {
     const entry = Object.entries(all).find(([, r]) => r.agentId === agentId && !r.isDone)
     if (entry === undefined) return all
@@ -361,7 +361,7 @@ async function stepReview($: $, agentId: string, step: string): Promise<void> {
   })
 }
 
-async function finishReview($: $, agentId: string): Promise<void> {
+async function finishReview($: Engine, agentId: string): Promise<void> {
   await update($, reviewsAtom, all => {
     const entry = Object.entries(all).find(([, r]) => r.agentId === agentId && !r.isDone)
     return entry === undefined ? all : { ...all, [entry[0]]: { ...entry[1], isDone: true, lastStep: 'done' } }
@@ -374,25 +374,25 @@ const stepLabel = (tool: string, input: Record<string, unknown>) => {
   return short === '' ? tool : `${tool} ${short}`
 }
 
-async function watchStep($: $, cfg: Config): Promise<void> {
+async function watchStep($: Engine, cfg: Config): Promise<void> {
   const reviewed = await watchTick($, cfg.watchModel).catch(() => false)
   if (reviewed) await refresh($, cfg)
 }
 
-async function autosaveStep($: $, cfg: Config): Promise<void> {
+async function autosaveStep($: Engine, cfg: Config): Promise<void> {
   const saved = await autosaveTick($).catch(() => null)
   if (saved === null) return
   if ((await focusMode($, cfg)) !== 'focus') $.ui.toast(`💾 ${saved}`)
   await refresh($, cfg).catch(() => undefined)
 }
 
-function startWatching($: $, cfg: Config): void {
+function startWatching($: Engine, cfg: Config): void {
   watchTimer?.cancel()
   resetWatchBaseline()
   watchTimer = $.clock.every(TICK_MS, () => void watchStep($, cfg))
 }
 
-async function setWatching($: $, cfg: Config, isOn: boolean, personas?: string[]): Promise<void> {
+async function setWatching($: Engine, cfg: Config, isOn: boolean, personas?: string[]): Promise<void> {
   if (isOn) startWatching($, cfg)
   else {
     watchTimer?.cancel()
@@ -446,7 +446,7 @@ export const register: Register = (on, options) => {
     if (!['', 'check', 'edit', 'setup'].includes(verb)) return { text: 'Usage: /cowrite:scope [check|edit]' }
     if (verb === 'edit' || verb === 'setup') {
       if ((await findPaper($)) === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
-      return next({ ...e, args: 'edit' })
+      return next(e)
     }
     return { text: await scopeCommand($, cfg, verb) }
   }).catch(commandFailed)
@@ -539,8 +539,8 @@ export const register: Register = (on, options) => {
       await refresh($, cfg)
       return { text: `📋 Brief for ${name} saved in party.md.` }
     }
-    // the interview: the skill's text, with the section heading as its argument
-    return next({ ...e, args: key === 'everyone' ? 'everyone — the whole party' : `${persona!.id} — ${persona!.name}` })
+    // the interview: the skill's text, with the persona as typed; the event goes on unchanged
+    return next(e)
   }).catch(commandFailed)
 
   on('command.run', { command: 'cowrite:party' }, async ($, e, next) => {
@@ -548,7 +548,7 @@ export const register: Register = (on, options) => {
     if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
     const [verb = '', ...words] = e.args.trim().split(/\s+/).filter(Boolean)
     const answer = await partyCommand($, cfg, paper, verb.toLowerCase(), words)
-    return typeof answer === 'string' ? { text: answer } : next({ ...e, args: answer.args })
+    return typeof answer === 'string' ? { text: answer } : next(e)
   }).catch(commandFailed)
 
   on('command.run', { command: 'cowrite:ask' }, async ($, e, next) => {
@@ -556,7 +556,7 @@ export const register: Register = (on, options) => {
     const persona = personaById(who)
     const question = rest.join(' ').trim()
     if (persona === undefined || question === '') return { text: 'Usage: /cowrite:ask <persona> <question>' }
-    return next({ ...e, args: `${persona.id} ${question}` })
+    return next(e)
   }).catch(commandFailed)
 
   on('command.run', { command: 'cowrite:quiet' }, async ($, e) => {
@@ -580,14 +580,14 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'cowrite:summon' }, async ($, e, next) => {
-    const [id = '', ...rest] = e.args.trim().split(/\s+/)
+    const [id = ''] = e.args.trim().split(/\s+/)
     const party = partyPersonas((await findPaper($))?.party ?? [])
     const persona = personaById(id)
     if (id === '' || persona === undefined) {
       const names = party.map(p => p.id).join(', ')
       return { text: `${id === '' ? '' : `Unknown persona "${id}". `}Usage: /cowrite:summon <persona> [file]. Your party: ${names}` }
     }
-    return next({ ...e, args: `${persona.id} ${rest.join(' ')}`.trim() })
+    return next(e)
   }).catch(commandFailed)
 
   on('prompt.compose', async ($, e, next) => {

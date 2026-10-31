@@ -12,11 +12,11 @@ import type { Fingerprint } from './core'
 import { CUSTOM_TOOLS, DEFAULT_PARTY, PERSONAS, customDescription, customPersonas, parsePersonaFile, setCustomPersonas } from './personas'
 import type { CustomPersona } from './personas'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
 
-async function readJson<T>($: $, path: string): Promise<T | undefined> {
+async function readJson<T>($: Engine, path: string): Promise<T | undefined> {
   try {
     if (!(await $.fs.exists(path))) return undefined
     return JSON.parse(await $.fs.read(path)) as T
@@ -49,7 +49,7 @@ const RECENT_KEY = 'recentPapers'
 const KEEP_RECENT = 8
 
 /** The paper the session works on, or null outside a CoWriting workspace. */
-export async function findPaper($: $): Promise<Paper | null> {
+export async function findPaper($: Engine): Promise<Paper | null> {
   const chosen = await read($, paperRootAtom)
   if (chosen !== null) {
     const json = await readJson<PaperJson>($, join(chosen, 'paper.json'))
@@ -79,7 +79,7 @@ let loadedRoot: string | null = null
 const registered = new Map<string, string>()
 
 /** The party/<id>.md files of a paper as personas, with the ids of files that are not one. */
-export async function readCustomPersonas($: $, root: string): Promise<{ experts: CustomPersona[]; broken: string[] }> {
+export async function readCustomPersonas($: Engine, root: string): Promise<{ experts: CustomPersona[]; broken: string[] }> {
   const dir = join(root, PARTY_DIR)
   const experts: CustomPersona[] = []
   const broken: string[] = []
@@ -99,15 +99,18 @@ export async function readCustomPersonas($: $, root: string): Promise<{ experts:
  * cowrite:<id> agent type the model can dispatch from the next turn on; one already registered with the
  * same prompt is left alone. Returns the ids of files that are not a persona.
  */
-export async function loadParty($: $, root: string): Promise<string[]> {
+export async function loadParty($: Engine, root: string): Promise<string[]> {
   const { experts, broken } = await readCustomPersonas($, root)
   if (loadedRoot !== root) registered.clear()
   loadedRoot = root
   setCustomPersonas(experts.map(e => e.persona))
   for (const { persona, prompt } of experts) {
     if (registered.get(persona.id) === prompt) continue
+    const name = persona.id
+    const description = customDescription(persona)
     try {
-      await $.agent.register({ name: persona.id, description: customDescription(persona), prompt, tools: CUSTOM_TOOLS })
+      // written out member by member: the directory reads the registration as it stands here
+      await $.agent.register({ name: name, description: description, prompt: prompt, tools: CUSTOM_TOOLS })
       registered.set(persona.id, prompt)
     } catch {
       // not bound yet, or the spec refused: the next load tries again
@@ -118,14 +121,14 @@ export async function loadParty($: $, root: string): Promise<string[]> {
 }
 
 /** Writes the roster of catalogue members into paper.json, keeping everything else in it. */
-export async function writeParty($: $, root: string, ids: readonly string[]): Promise<void> {
+export async function writeParty($: Engine, root: string, ids: readonly string[]): Promise<void> {
   const path = join(root, 'paper.json')
   const json = (await readJson<PaperJson & Record<string, unknown>>($, path)) ?? {}
   const { domainPack: _pack, ...rest } = json
   await $.fs.write(path, `${JSON.stringify({ ...rest, party: ids }, null, 2)}\n`)
 }
 
-export async function readLog($: $, root: string): Promise<LogEntry[]> {
+export async function readLog($: Engine, root: string): Promise<LogEntry[]> {
   const dir = join(root, 'ai-log')
   if (!(await $.fs.exists(dir))) return []
   const files = (await $.fs.list(dir))
@@ -156,7 +159,7 @@ export function withLog<T>(root: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** Append one entry to this month's log file (append-only by content). */
-export function appendLog($: $, root: string, entry: LogEntry): Promise<void> {
+export function appendLog($: Engine, root: string, entry: LogEntry): Promise<void> {
   const stamped = entry.type === 'response' ? { ...entry, ...versions } : entry
   return withLog(root, async () => {
     const path = join(root, 'ai-log', monthFile(new Date()))
@@ -176,7 +179,7 @@ export const CONVERTED_FILE = /\.(docx|odt)$/i
  * A manuscript file as text: the file itself, or for a Word/LibreOffice file what
  * pandoc makes of it (Markdown, lines unwrapped). Rejects when pandoc is missing or fails.
  */
-export async function readText($: $, path: string): Promise<string> {
+export async function readText($: Engine, path: string): Promise<string> {
   if (!CONVERTED_FILE.test(path)) return $.fs.read(path)
   const run = await $.process.run(['pandoc', path, '--to', 'markdown', '--wrap=none'], { timeoutMs: 60_000 })
   if (run.exitCode !== 0) throw new Error(`pandoc could not read ${path}: ${run.stderr.trim() || `exit ${run.exitCode}`}`)
@@ -188,7 +191,7 @@ export async function readText($: $, path: string): Promise<string> {
  * listed by the scaffold tool; with apply, made. Runs on the host, not as a tool call,
  * so the guard neither refuses it (the author asked) nor records it as a detected change.
  */
-export async function upgradePaper($: $, root: string, isApply: boolean): Promise<string> {
+export async function upgradePaper($: Engine, root: string, isApply: boolean): Promise<string> {
   const tool = join($.plugin.root, 'tools', 'new_paper.py')
   const run = await $.process.run(['python3', '-I', tool, '--upgrade', ...(isApply ? ['--apply'] : []), '--dir', root], { cwd: root, timeoutMs: 60_000 })
   if (run.exitCode !== 0) return `Upgrade failed:\n${(run.stderr || run.stdout).trim()}`
@@ -201,7 +204,7 @@ export async function upgradePaper($: $, root: string, isApply: boolean): Promis
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules'])
 
 /** Every file of the author's under the paper, a few levels deep: Claude's places are left out. */
-export async function listAuthorFiles($: $, root: string, dir = root, depth = 0): Promise<string[]> {
+export async function listAuthorFiles($: Engine, root: string, dir = root, depth = 0): Promise<string[]> {
   if (depth > 4 || !(await $.fs.exists(dir))) return []
   const out: string[] = []
   for (const entry of await $.fs.list(dir)) {
@@ -215,7 +218,7 @@ export async function listAuthorFiles($: $, root: string, dir = root, depth = 0)
 }
 
 /** The author's files as they are now: relative path → `mtime:size`. */
-export async function fingerprintAuthorFiles($: $, paper: Paper): Promise<Fingerprint> {
+export async function fingerprintAuthorFiles($: Engine, paper: Paper): Promise<Fingerprint> {
   const out: Record<string, string> = {}
   for (const path of await listAuthorFiles($, paper.root)) {
     const stat = await $.fs.stat(path).catch(() => null)
@@ -225,12 +228,12 @@ export async function fingerprintAuthorFiles($: $, paper: Paper): Promise<Finger
 }
 
 /** The names at the paper's root that are wholly the author's: what a shell command may not write to. */
-export async function authorNames($: $, root: string): Promise<string[]> {
+export async function authorNames($: Engine, root: string): Promise<string[]> {
   const entries = await $.fs.list(root).catch(() => [])
   return entries.map(e => e.name).filter(name => !SKIPPED_FOLDERS.has(name) && isAuthorsName(name))
 }
 
-async function wordsUnder($: $, dir: string, depth: number): Promise<number> {
+async function wordsUnder($: Engine, dir: string, depth: number): Promise<number> {
   if (depth > 4 || !(await $.fs.exists(dir))) return 0
   let total = 0
   for (const entry of await $.fs.list(dir)) {
@@ -244,23 +247,23 @@ async function wordsUnder($: $, dir: string, depth: number): Promise<number> {
   return total
 }
 
-export async function manuscriptWords($: $, paper: Paper): Promise<number> {
+export async function manuscriptWords($: Engine, paper: Paper): Promise<number> {
   return wordsUnder($, join(paper.root, 'manuscript'), 0)
 }
 
 const gamePath = (root: string) => join(root, '.cowriting', 'game.json')
 
-export async function readGame($: $, root: string): Promise<GameFile> {
+export async function readGame($: Engine, root: string): Promise<GameFile> {
   const game = await readJson<GameFile>($, gamePath(root))
   return game?.version === 1 ? { ...NEW_GAME, ...game } : NEW_GAME
 }
 
-export async function writeGame($: $, root: string, game: GameFile): Promise<void> {
+export async function writeGame($: Engine, root: string, game: GameFile): Promise<void> {
   await $.fs.write(gamePath(root), `${JSON.stringify(game, null, 2)}\n`)
 }
 
 /** Counts the tools write: verified references and generated disclosures. */
-export async function readToolCounts($: $, root: string) {
+export async function readToolCounts($: Engine, root: string) {
   // 0.2.0 writes the summary in Claude's place; a run before that left it in literature/
   const verify =
     (await readJson<{ ok?: number }>($, join(root, '.cowriting', 'verify.json'))) ??
@@ -272,7 +275,7 @@ export async function readToolCounts($: $, root: string) {
   return { verifiedRefs: verify?.ok ?? 0, disclosures }
 }
 
-export async function setActiveProject($: $, name: string): Promise<string> {
+export async function setActiveProject($: Engine, name: string): Promise<string> {
   const cwd = await $.session.cwd()
   const root = join(cwd, 'projects', name)
   if (!(await $.fs.exists(join(root, 'paper.json')))) {
@@ -284,20 +287,20 @@ export async function setActiveProject($: $, name: string): Promise<string> {
 }
 
 /** Papers opened by path before, newest first (kept across sessions). */
-export async function recentPapers($: $): Promise<string[]> {
+export async function recentPapers($: Engine): Promise<string[]> {
   const value = await $.store.get(RECENT_KEY).catch(() => undefined)
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
 /** `~/x`, `x` (relative to the session's folder) or `/x`, without a trailing slash. */
-async function absolutePath($: $, arg: string): Promise<string> {
+async function absolutePath($: Engine, arg: string): Promise<string> {
   const raw = arg.trim().replace(/^(['"])(.*)\1$/, '$2')
   if (raw === '~' || raw.startsWith('~/')) return join((await $.env.get('HOME')) ?? '', raw.slice(1)).replace(/(.)\/$/, '$1')
   const path = raw.startsWith('/') ? raw : join(await $.session.cwd(), raw)
   return path.replace(/(.)\/$/, '$1')
 }
 
-async function kindOf($: $, path: string): Promise<'file' | 'dir' | 'other' | 'none'> {
+async function kindOf($: Engine, path: string): Promise<'file' | 'dir' | 'other' | 'none'> {
   return $.fs.stat(path).then(s => s.kind, () => 'none' as const)
 }
 
@@ -305,7 +308,7 @@ async function kindOf($: $, path: string): Promise<'file' | 'dir' | 'other' | 'n
  * /cowrite:paper <arg>: a number picks a recent paper, a bare name one under
  * projects/, anything else is a path to a paper folder (or a file in it).
  */
-export async function openPaper($: $, arg: string): Promise<string> {
+export async function openPaper($: Engine, arg: string): Promise<string> {
   const recent = await recentPapers($)
   if (/^\d+$/.test(arg)) {
     const pick = recent[Number(arg) - 1]
@@ -333,7 +336,7 @@ export async function openPaper($: $, arg: string): Promise<string> {
  * /cowrite:init <path>: the session works on that folder from now on, so the
  * workspace the skill scaffolds there is the active paper once it exists.
  */
-export async function targetFolder($: $, arg: string): Promise<string | null> {
+export async function targetFolder($: Engine, arg: string): Promise<string | null> {
   const root = await absolutePath($, arg)
   if ((await kindOf($, root)) !== 'dir') return null
   await update($, paperRootAtom, () => root)
@@ -343,7 +346,7 @@ export async function targetFolder($: $, arg: string): Promise<string | null> {
 }
 
 /** /cowrite:paper without arguments: the active paper and the recent ones. */
-export async function describePapers($: $): Promise<string> {
+export async function describePapers($: Engine): Promise<string> {
   const paper = await findPaper($)
   const recent = await recentPapers($)
   const lines = [paper === null ? 'No active paper.' : `Active paper: ${paper.name} · ${paper.root}`]
@@ -352,14 +355,14 @@ export async function describePapers($: $): Promise<string> {
   return lines.join('\n')
 }
 
-export async function readBriefs($: $, root: string): Promise<Record<string, string>> {
+export async function readBriefs($: Engine, root: string): Promise<Record<string, string>> {
   const path = join(root, BRIEF_FILE)
   if (!(await $.fs.exists(path))) return {}
   return parseBriefs(await $.fs.read(path))
 }
 
 /** Sets one section of party.md, creating the file when the paper has none. */
-export async function writeBrief($: $, root: string, key: string, body: string): Promise<void> {
+export async function writeBrief($: Engine, root: string, key: string, body: string): Promise<void> {
   const path = join(root, BRIEF_FILE)
   const before = (await $.fs.exists(path)) ? await $.fs.read(path) : '# Briefing for the review party\n'
   await $.fs.write(path, setBrief(before, key, body))

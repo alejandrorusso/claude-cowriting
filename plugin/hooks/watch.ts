@@ -12,7 +12,7 @@ import type { Paragraph } from './core'
 import { partyPersonas, personaById } from './personas'
 import { MANUSCRIPT_FILE, appendLog, findPaper, readBriefs, readText } from './workspace'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 export const TICK_MS = 5_000
 export const PAUSE_MS = 20_000
@@ -52,7 +52,7 @@ export const resetWatchBaseline = () => {
 
 const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
 
-async function manuscriptFiles($: $, dir: string, depth: number): Promise<string[]> {
+async function manuscriptFiles($: Engine, dir: string, depth: number): Promise<string[]> {
   if (depth > 4 || !(await $.fs.exists(dir))) return []
   const out: string[] = []
   for (const entry of await $.fs.list(dir)) {
@@ -63,12 +63,12 @@ async function manuscriptFiles($: $, dir: string, depth: number): Promise<string
   return out
 }
 
-async function setStatus($: $, status: string): Promise<void> {
+async function setStatus($: Engine, status: string): Promise<void> {
   await update($, watchAtom, s => ({ ...s, status }))
 }
 
 /** One look at the manuscript; resolves true when a review ran and was logged. */
-export async function watchTick($: $, model: string): Promise<boolean> {
+export async function watchTick($: Engine, model: string): Promise<boolean> {
   const state = await read($, watchAtom)
   if (!state.isOn || seen.isBusy) return false
   const paper = await findPaper($)
@@ -108,7 +108,7 @@ export async function watchTick($: $, model: string): Promise<boolean> {
   }
 }
 
-async function review($: $, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
+async function review($: Engine, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
   const parts: { file: string; changed: Paragraph[] }[] = []
   for (const path of seen.dirty) {
     const after = await readText($, path).catch(() => null)

@@ -595,7 +595,7 @@ export const toUsage = (u: MeasuredUsage): Usage => ({
   limits: u.rateLimits.map(w => ({ kind: w.kind, percentUsed: w.percentUsed, ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}) })),
 })
 
-export const formatTokens = (n: number): string =>
+export const formatCount = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 
 const limitName = (kind: string) => (kind === 'five_hour' ? '5h' : kind === 'seven_day' ? '7d' : kind.replace(/_/g, ' '))
@@ -614,9 +614,9 @@ export const usageParts = (u: Usage, meter: UsageMeter, liveTokens: number): str
   if (meter === 'off') return []
   const parts: string[] = []
   if (u.contextTokens !== null) {
-    parts.push(`context ${formatTokens(u.contextTokens)}${u.contextPercent !== null ? ` (${Math.round(u.contextPercent)}%)` : ''}`)
+    parts.push(`context ${formatCount(u.contextTokens)}${u.contextPercent !== null ? ` (${Math.round(u.contextPercent)}%)` : ''}`)
   }
-  if (liveTokens > 0) parts.push(`live review ${formatTokens(liveTokens)}`)
+  if (liveTokens > 0) parts.push(`live review ${formatCount(liveTokens)}`)
   if (meter === 'tokens+limits') {
     for (const w of u.limits) parts.push(`${limitName(w.kind)} limit ${Math.round(w.percentUsed)}%${w.resetsAt ? ` ↻ ${resetLabel(w)}` : ''}`)
   }

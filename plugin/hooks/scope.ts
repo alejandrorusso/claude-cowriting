@@ -9,7 +9,7 @@ import type { Count, Paper, PointStatus, ScopePoint, ScopeProgress, ScopeSection
 import { countWords, newId } from './core'
 import { appendLog } from './workspace'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 export const SCOPE_FILE = 'scope.md'
 const CHECK_FILE = '.cowriting/scope-check.json'
@@ -296,7 +296,7 @@ type CheckFile = { ts: string; model: string; points: Record<string, { status: P
 
 const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
 
-export async function readCheck($: $, root: string): Promise<CheckFile | undefined> {
+export async function readCheck($: Engine, root: string): Promise<CheckFile | undefined> {
   try {
     const path = join(root, CHECK_FILE)
     return (await $.fs.exists(path)) ? (JSON.parse(await $.fs.read(path)) as CheckFile) : undefined
@@ -307,7 +307,7 @@ export async function readCheck($: $, root: string): Promise<CheckFile | undefin
 
 const TEXT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
 
-export async function readTextFiles($: $, paper: Paper): Promise<TextFile[]> {
+export async function readTextFiles($: Engine, paper: Paper): Promise<TextFile[]> {
   const out: TextFile[] = []
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > 4 || !(await $.fs.exists(dir))) return
@@ -323,7 +323,7 @@ export async function readTextFiles($: $, paper: Paper): Promise<TextFile[]> {
   return out.sort((a, b) => a.file.localeCompare(b.file))
 }
 
-export async function readPlan($: $, root: string): Promise<ScopePlan | null> {
+export async function readPlan($: Engine, root: string): Promise<ScopePlan | null> {
   const path = join(root, SCOPE_FILE)
   if (!(await $.fs.exists(path))) return null
   const plan = parseScope(await $.fs.read(path))
@@ -331,7 +331,7 @@ export async function readPlan($: $, root: string): Promise<ScopePlan | null> {
 }
 
 /** The scope's progress now, or null when the author has not set one. */
-export async function measureScope($: $, paper: Paper, today: string): Promise<ScopeProgress | null> {
+export async function measureScope($: Engine, paper: Paper, today: string): Promise<ScopeProgress | null> {
   const plan = await readPlan($, paper.root)
   if (plan === null) return null
   const check = await readCheck($, paper.root)
@@ -339,7 +339,7 @@ export async function measureScope($: $, paper: Paper, today: string): Promise<S
 }
 
 /** /cowrite:scope check: which points the text makes. Logged; resolves a one-line summary. */
-export async function checkPoints($: $, paper: Paper, model: string): Promise<string> {
+export async function checkPoints($: Engine, paper: Paper, model: string): Promise<string> {
   const plan = await readPlan($, paper.root)
   if (plan === null || plan.points.length === 0) return 'No points in scope.md yet: add them under "## Points", or run /cowrite:scope edit.'
   const files = await readTextFiles($, paper)

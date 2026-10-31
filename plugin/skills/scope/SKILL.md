@@ -5,7 +5,7 @@ argument-hint: "[check|edit]"
 disable-model-invocation: true
 ---
 
-The plugin answers `/cowrite:scope` and `/cowrite:scope check` itself. What reaches you is `edit`: setting the scope with the author.
+The plugin answers `/cowrite:scope` and `/cowrite:scope check` itself. What reaches you is `edit` or `setup`, in any capitalisation: setting the scope with the author.
 
 Help the author set the scope of this paper in `scope.md`. Interview them, one question at a time: the goal (what should a reader know or believe afterwards), the points they want to make, the length in words or pages, figures, tables and references, the sections with word targets and how far each one is (outline, draft, revised, final), and the deadline. Then write their answers into `scope.md` in their words, following its structure (`## Goal`, `## Targets`, `## Sections`, `## Points` as `- [ ] …` lines) and keeping its comment lines. Add no points of your own; you may ask whether something is missing. Show them the result.
 

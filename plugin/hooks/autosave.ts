@@ -11,7 +11,7 @@ import { autosaveMessage, changedPaths, countWords } from './core'
 import type { FileChange } from './core'
 import { findPaper } from './workspace'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 export const AUTOSAVE_TICK_MS = 15_000
 /** How long the manuscript must stay unchanged before it is committed. */
@@ -25,24 +25,24 @@ const TEXT_FILE = /\.(md|markdown|tex|txt)$/
 let isBusy = false
 let reported = ''
 
-function git($: $, paper: Paper, args: readonly string[]) {
+function git($: Engine, paper: Paper, args: readonly string[]) {
   return $.process.run(['git', ...args], { cwd: paper.root })
 }
 
-function reportOnce($: $, kind: string, text: string): void {
+function reportOnce($: Engine, kind: string, text: string): void {
   if (reported === kind) return
   reported = kind
   $.ui.toast(text)
 }
 
-async function newLogEntries($: $, paper: Paper, top: string, path: string): Promise<number> {
+async function newLogEntries($: Engine, paper: Paper, top: string, path: string): Promise<number> {
   const shown = await git($, paper, ['show', `HEAD:${path}`])
   const lines = (text: string) => text.split('\n').filter(l => l.trim() !== '').length
   const before = shown.exitCode === 0 ? lines(shown.stdout) : 0
   return (await $.fs.read(`${top}/${path}`).then(lines, () => 0)) - before
 }
 
-async function wordsAt($: $, paper: Paper, top: string, path: string): Promise<FileChange> {
+async function wordsAt($: Engine, paper: Paper, top: string, path: string): Promise<FileChange> {
   const shown = await git($, paper, ['show', `HEAD:${path}`])
   const before = shown.exitCode === 0 ? countWords(shown.stdout, paper.format) : 0
   const after = await $.fs.read(`${top}/${path}`).then(text => countWords(text, paper.format), () => 0)
@@ -50,7 +50,7 @@ async function wordsAt($: $, paper: Paper, top: string, path: string): Promise<F
 }
 
 /** One look at the manuscript and the AI log; resolves the commit's title when it committed. */
-export async function autosaveTick($: $): Promise<string | null> {
+export async function autosaveTick($: Engine): Promise<string | null> {
   if (isBusy) return null
   isBusy = true
   try {

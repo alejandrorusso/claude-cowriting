@@ -5,6 +5,7 @@
 ### The plugin is now `cowrite`
 
 - The plugin's name changed from `cw` to `cowrite`, so every command is `/cowrite:<name>` and every persona is the `cowrite:<id>` agent. The old slug was two letters with no product word in it, which the plugin directory holds for a reviewer and never lets a listing change afterwards. Reinstall: `/plugin uninstall cw`, then `/plugin install cowrite --marketplace dozwa/claude-cowriting`. AI logs and party files from before keep working: a persona id with the old `cw:` prefix is still read.
+- For the plugin directory's reader: the hooks module no longer names its type alias `$` (it is `Engine`), the typed commands that hand on to a skill pass the event on unchanged and the skill reads the persona as the author typed it, the custom-expert registration is written out member by member, and the plugin README says hook by hook what the mod runs, writes and sends.
 - A README inside the plugin folder, which is what the directory shows as the listing. The root README's privacy section now names what does reach the network: Crossref, Zotero on `localhost`, and web search when a persona looks for literature.
 
 ## 0.2.0 (2026-11-01)

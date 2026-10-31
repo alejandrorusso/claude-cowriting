@@ -8,8 +8,8 @@ import { personaById } from './personas'
 import type { Persona } from './personas'
 import { rasterCells, svgSource } from './sprites'
 
-type $ = EngineInterface
-type RenderInput = Parameters<$['ui']['resolve']>[0]
+type Engine = EngineInterface
+type RenderInput = Parameters<Engine['ui']['resolve']>[0]
 
 type PaneProps = {
   columns: number
@@ -49,7 +49,7 @@ const bar = (value: number, max: number, width: number) => {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
-function sprite($: $, e: RenderInput, persona: Persona) {
+function sprite($: Engine, e: RenderInput, persona: Persona) {
   if (e.surface === 'terminal') {
     const { Raster } = $.ui.resolve(e)
     const raster = rasterCells(persona)
@@ -62,7 +62,7 @@ function sprite($: $, e: RenderInput, persona: Persona) {
   return null
 }
 
-export function drawPane($: $, e: RenderInput, props: PaneProps) {
+export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const { snapshot, tab } = props
   const columns = Math.max(CARD, props.columns)
@@ -271,7 +271,7 @@ const pointIcon = (p: ScopePoint) => (p.isTicked ? '☑' : POINT_ICON[p.status ?
 const countText = (label: string, c: Count) => (c.target === undefined ? `${label} ${c.done}` : `${label} ${c.done}/${c.target}`)
 
 /** The Scope tab: the author's plan against what the manuscript has so far. */
-function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: number, onCheck: () => void, onEdit: () => void) {
+function drawScope($: Engine, e: RenderInput, scope: ScopeProgress | null, columns: number, onCheck: () => void, onEdit: () => void) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const width = Math.max(10, Math.min(30, columns - 26))
   if (scope === null) {
@@ -370,7 +370,7 @@ function drawScope($: $, e: RenderInput, scope: ScopeProgress | null, columns: n
 const whoSaid = (turn: RecentTurn) => (turn.persona !== undefined ? personaById(turn.persona)?.name ?? turn.persona : 'Claude')
 
 /** One AI input to classify: who said it, what you asked, what it said, and the four choices. */
-function classifyCard($: $, e: RenderInput, turn: RecentTurn, isFirst: boolean, onAnnotate: (ref: string, use: string) => void, columns: number) {
+function classifyCard($: Engine, e: RenderInput, turn: RecentTurn, isFirst: boolean, onAnnotate: (ref: string, use: string) => void, columns: number) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const width = Math.max(20, columns - 14)
   const asked = turn.origin === 'agent' ? `its report on your text` : `“${cut(turn.preview, width - 2)}”`
@@ -400,7 +400,7 @@ function classifyCard($: $, e: RenderInput, turn: RecentTurn, isFirst: boolean, 
 }
 
 /** Claude Code's own step, as one dim line (calm) or nothing (focus). */
-export function drawToolLine($: $, e: RenderInput, props: { label: string; isRunning: boolean; isHidden: boolean }) {
+export function drawToolLine($: Engine, e: RenderInput, props: { label: string; isRunning: boolean; isHidden: boolean }) {
   const { Box, Text } = $.ui.resolve(e)
   if (props.isHidden) return <Box />
   return (
@@ -412,7 +412,7 @@ export function drawToolLine($: $, e: RenderInput, props: { label: string; isRun
 }
 
 /** The turn's closing line while personas are still at work. */
-export function drawWaiting($: $, e: RenderInput, names: readonly string[]) {
+export function drawWaiting($: Engine, e: RenderInput, names: readonly string[]) {
   const { Text } = $.ui.resolve(e)
   return <Text dimColor>⏳ waiting for {names.join(', ')}…</Text>
 }
@@ -420,7 +420,7 @@ export function drawWaiting($: $, e: RenderInput, names: readonly string[]) {
 type ReviewRowProps = { persona: Persona; review: Review | undefined; isFailed: boolean }
 
 /** A persona's Agent call in the transcript: one line with a progress bar. */
-export function drawReviewRow($: $, e: RenderInput, props: ReviewRowProps) {
+export function drawReviewRow($: Engine, e: RenderInput, props: ReviewRowProps) {
   const { Box, Text } = $.ui.resolve(e)
   const { persona, review, isFailed } = props
   const steps = review?.steps ?? 0
@@ -443,7 +443,7 @@ type LiveBandProps = {
 }
 
 /** The newest live hints, above the prompt, where the author looks between sentences. */
-export function drawLiveBand($: $, e: RenderInput, props: LiveBandProps) {
+export function drawLiveBand($: Engine, e: RenderInput, props: LiveBandProps) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const ref = props.watch.hints[0]?.ref
   const latest = props.watch.hints.filter(one => one.ref === ref)
@@ -471,7 +471,7 @@ type BandProps = {
   onHide: () => void
 }
 
-export function drawBand($: $, e: RenderInput, props: BandProps) {
+export function drawBand($: Engine, e: RenderInput, props: BandProps) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const { stats } = props.snapshot
   const open = stats.open[0]
