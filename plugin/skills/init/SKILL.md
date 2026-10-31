@@ -23,7 +23,7 @@ Target folder: `$ARGUMENTS` if given (a path, `~` allowed; it must exist), else 
    If the output lists text outside the manuscript folder (`!` lines), tell the author to move those files into `manuscript/` themselves, in place of the skeleton file if they like. Don't move them yourself.
 3. Show what was created and explain the next steps briefly:
    - Zotero: in Zotero, right-click your collection → *Export Collection…* → format **Better BibLaTeX**, tick **Keep updated**, save as `literature/references.bib`.
-   - Write only in `manuscript/`; Claude can read but never change it.
+   - Write only in `manuscript/`; Claude can read but never change it. An author who writes in Word or LibreOffice puts the `.docx`/`.odt` there (Markdown format for the workspace); the party reads it through pandoc, which must be installed.
    - `/cw:pane` opens the pane with the review party; `/cw:summon <persona>` asks one of them for a review, `/cw:ask <persona> <question>` asks it anything, `/cw:party` shows and changes who is in it.
    - From another folder, `/cw:paper <path>` opens this paper again; `/cw:paper` alone lists recent papers.
    - The manuscript and the AI log are committed automatically after each change (once the author pauses for 30 s), under their own git name, so the history documents their authorship. If `git config user.name` is empty, tell them to set it.

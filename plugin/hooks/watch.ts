@@ -10,7 +10,7 @@ import type { LiveHint, Paper, WatchState } from '../types'
 import { changedParagraphs, localTime, newId, parseHints, plural, watchExcerpt, watchSystem } from './core'
 import type { Paragraph } from './core'
 import { partyPersonas, personaById } from './personas'
-import { appendLog, findPaper, readBriefs } from './workspace'
+import { MANUSCRIPT_FILE, appendLog, findPaper, readBriefs, readText } from './workspace'
 
 type $ = EngineInterface
 
@@ -51,7 +51,6 @@ export const resetWatchBaseline = () => {
 }
 
 const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
-const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
 
 async function manuscriptFiles($: $, dir: string, depth: number): Promise<string[]> {
   if (depth > 4 || !(await $.fs.exists(dir))) return []
@@ -82,7 +81,7 @@ export async function watchTick($: $, model: string): Promise<boolean> {
     if (known === mtimeMs) continue
     seen.mtimes.set(path, mtimeMs)
     if (known === undefined || !seen.texts.has(path)) {
-      seen.texts.set(path, await $.fs.read(path)) // the baseline: what was there when watching began
+      seen.texts.set(path, await readText($, path).catch(() => '')) // the baseline: what was there when watching began
       continue
     }
     seen.dirty.add(path)
@@ -112,7 +111,8 @@ export async function watchTick($: $, model: string): Promise<boolean> {
 async function review($: $, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
   const parts: { file: string; changed: Paragraph[] }[] = []
   for (const path of seen.dirty) {
-    const after = await $.fs.read(path)
+    const after = await readText($, path).catch(() => null)
+    if (after === null) continue // unreadable (pandoc missing, or a save half done): reviewed after the next save
     const changed = changedParagraphs(seen.texts.get(path) ?? '', after, paper.format)
     seen.texts.set(path, after)
     if (changed.length > 0) parts.push({ file: path.slice(paper.root.length + 1), changed })

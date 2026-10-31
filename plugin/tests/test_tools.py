@@ -127,6 +127,46 @@ class PaperWorkspace(unittest.TestCase):
             self.assertIn("./projects/beta/literature", settings["sandbox"]["filesystem"]["denyWrite"])
             self.assertEqual((ws / ".active-project").read_text(encoding="utf-8").strip(), "beta")
 
+    def test_upgrade_brings_an_older_workspace_up_to_date_and_keeps_the_authors_copy(self) -> None:
+        settings_path = self.root / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings["permissions"]["deny"] = ["Edit(manuscript/**)", "Edit(mine/**)"]
+        settings.pop("sandbox")
+        settings_path.write_text(json.dumps(settings), encoding="utf-8")
+        rules = self.root / "CLAUDE.md"
+        rules.write_text("# my old rules\n", encoding="utf-8")
+        paper_json = self.root / "paper.json"
+        paper_json.write_text(json.dumps({"name": "Testarbeit", "format": "latex", "language": "de", "domainPack": "medicine"}), encoding="utf-8")
+        (self.root / "notes" / "ai" / "README.md").unlink()
+        (self.root / "party.md").write_text("## everyone\n- my briefing\n", encoding="utf-8")
+
+        dry = run("new_paper.py", "--upgrade", "--dir", str(self.root), cwd=self.root)
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        for line in ("deny rule(s)", "the sandbox switched on", "CLAUDE.md: differs", "party roster to add", "+ notes/ai/README.md", "Nothing changed yet."):
+            self.assertIn(line, dry.stdout)
+        self.assertEqual(rules.read_text(encoding="utf-8"), "# my old rules\n", "a dry run changes nothing")
+        self.assertNotIn("sandbox", json.loads(settings_path.read_text(encoding="utf-8")))
+
+        done = run("new_paper.py", "--upgrade", "--apply", "--dir", str(self.root), cwd=self.root)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("Upgraded.", done.stdout)
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertIn("Edit(mine/**)", settings["permissions"]["deny"], "the author's own rule stays")
+        self.assertIn("Edit(CLAUDE.md)", settings["permissions"]["deny"])
+        self.assertTrue(settings["sandbox"]["enabled"])
+        self.assertIn("CoWriting workspace: Testarbeit", rules.read_text(encoding="utf-8"))
+        backups = list((self.root / ".cowriting" / "upgrade").glob("*/CLAUDE.md"))
+        self.assertEqual(len(backups), 1, "the author's copy is kept once")
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "# my old rules\n")
+        paper = json.loads(paper_json.read_text(encoding="utf-8"))
+        self.assertIn("clinician", paper["party"], "the medicine pack's clinician stays in the party")
+        self.assertNotIn("domainPack", paper)
+        self.assertTrue((self.root / "notes" / "ai" / "README.md").exists())
+        self.assertEqual((self.root / "party.md").read_text(encoding="utf-8"), "## everyone\n- my briefing\n", "the briefing is the author's")
+
+        again = run("new_paper.py", "--upgrade", "--dir", str(self.root), cwd=self.root)
+        self.assertIn("nothing to do", again.stdout)
+
     # ---------------------------------------------------------------- ailog
 
     def test_stats_and_list_follow_the_pane(self) -> None:

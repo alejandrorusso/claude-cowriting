@@ -845,6 +845,69 @@ test('a paper.json from before rosters keeps its party: the pack\'s clinician in
   expect(listed.text).not.toContain('Not in the party:')
 })
 
+test('/cw:paper upgrade lists what an older workspace lacks; `apply` makes the scaffold tool add it', async ($, on) => {
+  workspace(on, paperFiles())
+  const runs: (readonly string[])[] = []
+  on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
+    runs.push(e.argv)
+    const isApply = e.argv.includes('--apply')
+    const stdout = `Paper workspace: ${ROOT}\n  ~ paper.json: party roster to add\n${isApply ? 'Upgraded.' : 'Nothing changed yet.'}\n`
+    return { value: { exitCode: 0, stdout, stderr: '' } as never }
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+
+  const dry = await $.command.run({ command: 'cw:paper', args: 'upgrade', origin: { kind: 'composer' }, presentation })
+  expect(dry.text).toContain('party roster to add')
+  expect(dry.text).toContain('Apply with /cw:paper upgrade apply')
+  const argv = runs.at(-1)!
+  expect(argv[0]).toBe('python3')
+  expect(argv[2]).toMatch(/tools\/new_paper\.py$/)
+  expect(argv).toContain('--upgrade')
+  expect(argv).not.toContain('--apply')
+  expect(argv.slice(-2)).toEqual(['--dir', ROOT])
+
+  const applied = await $.command.run({ command: 'cw:paper', args: 'upgrade apply', origin: { kind: 'composer' }, presentation })
+  expect(applied.text).toContain('Upgraded.')
+  expect(applied.text).not.toContain('Apply with')
+  expect(runs.at(-1)).toContain('--apply')
+})
+
+test('a Word manuscript is read through pandoc: the Read tool and the word count see text', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/manuscript/kapitel.docx`, 'PK\u0003\u0004 not text')
+  workspace(on, files)
+  on('tool.call', () => ({ result: {} }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
+    runs.push(e.argv)
+    const stdout = e.argv[0] === 'pandoc' ? '# Kapitel 1\n\nDas ist mein Text aus Word.\n' : ''
+    return { value: { exitCode: 0, stdout, stderr: '' } as never }
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  const pandocRuns = () => runs.filter(r => r[0] === 'pandoc').length
+  const base = pandocRuns() // the pane's word count at session start already converted it
+  const whole = await $.tool.call({ tool: 'Read', file_path: `${ROOT}/manuscript/kapitel.docx` })
+  expect(whole.deny).toBeUndefined()
+  const file = (whole.result as { file: { content: string; startLine: number; numLines: number; totalLines: number } }).file
+  expect(file.content).toContain('Das ist mein Text aus Word.')
+  expect(file.startLine).toBe(1)
+  expect(file.totalLines).toBe(4)
+  expect(runs.find(r => r[0] === 'pandoc')).toEqual(['pandoc', `${ROOT}/manuscript/kapitel.docx`, '--to', 'markdown', '--wrap=none'])
+
+  const part = await $.tool.call({ tool: 'Read', file_path: `${ROOT}/manuscript/kapitel.docx`, offset: 3, limit: 1 })
+  const slice = (part.result as { file: { content: string; startLine: number; numLines: number } }).file
+  expect(slice.content).toBe('Das ist mein Text aus Word.')
+  expect(slice.startLine).toBe(3)
+  expect(slice.numLines).toBe(1)
+
+  await $.tool.call({ tool: 'Read', file_path: `${ROOT}/manuscript/main.tex` })
+  expect(pandocRuns()).toBe(base + 2) // a text file is read as it is
+
+  expect(base).toBeGreaterThanOrEqual(1) // the word count behind the pane read the Word file through pandoc too
+})
+
 test('the pane shows the review party on every surface', async ($, on) => {
   workspace(on, paperFiles())
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })

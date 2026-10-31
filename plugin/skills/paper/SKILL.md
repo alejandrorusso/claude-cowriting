@@ -1,7 +1,7 @@
 ---
 name: paper
-description: Open a paper by path from any folder, pick a recent one by number, or switch projects/<name>. Without arguments it lists recent papers.
-argument-hint: "[path | number | project name]"
+description: Open a paper by path from any folder, pick a recent one by number, or switch projects/<name>. Without arguments it lists recent papers. `upgrade` shows what a workspace from an earlier plugin version lacks, `upgrade apply` adds it.
+argument-hint: "[path | number | project name | upgrade [apply]]"
 disable-model-invocation: true
 ---
 

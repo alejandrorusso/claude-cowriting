@@ -36,6 +36,7 @@ import { AUTOSAVE_TICK_MS, autosaveTick } from './autosave'
 import { SCOPE_FILE, checkPoints, measureScope } from './scope'
 import { IDLE_WATCH, PAUSE_MS, TICK_MS, resetWatchBaseline, watchTick } from './watch'
 import {
+  CONVERTED_FILE,
   appendLog,
   authorNames,
   describePapers,
@@ -46,10 +47,12 @@ import {
   readGame,
   readLog,
   readBriefs,
+  readText,
   readToolCounts,
   openPaper,
   setLogVersions,
   targetFolder,
+  upgradePaper,
   withLog,
   writeBrief,
   writeGame,
@@ -461,6 +464,15 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'cw:paper' }, async ($, e) => {
     const arg = e.args.trim()
     if (arg === '') return { text: await describePapers($) }
+    // /cw:paper upgrade: what an older workspace lacks; `apply` makes the changes, the author's copy kept
+    const upgrade = /^upgrade(\s+apply)?$/.exec(arg)
+    if (upgrade !== null) {
+      const paper = await findPaper($)
+      if (paper === null) return { text: 'No paper here: open one with /cw:paper <path>, or set one up with /cw:init.' }
+      const text = await upgradePaper($, paper.root, upgrade[1] !== undefined)
+      if (upgrade[1] !== undefined) await refresh($, cfg)
+      return { text }
+    }
     const text = await openPaper($, arg)
     await refresh($, cfg)
     return { text }
@@ -620,6 +632,26 @@ export const register: Register = (on, options) => {
     }).catch(() => undefined)
     return result
   }).catch(($, e, next) => next(e))
+
+  // A Word or LibreOffice file is read as text through pandoc, so the party can review a
+  // manuscript written there. Without pandoc, or on an error, the Read tool answers as usual.
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const input = e as unknown as { file_path?: string; offset?: number; limit?: number }
+    const given = String(input.file_path ?? '')
+    if (!CONVERTED_FILE.test(given)) return next(e)
+    const path = absolutePath(await $.session.cwd(), given)
+    const text = await readText($, path).catch(() => null)
+    if (text === null) return next(e)
+    const lines = text.split('\n')
+    const start = Math.max(1, Math.floor(input.offset ?? 1))
+    const slice = lines.slice(start - 1, input.limit === undefined ? undefined : start - 1 + Math.max(0, Math.floor(input.limit)))
+    return {
+      result: {
+        type: 'text',
+        file: { filePath: path, content: slice.join('\n'), numLines: slice.length, startLine: start, totalLines: lines.length },
+      },
+    }
+  }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)

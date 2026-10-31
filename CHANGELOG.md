@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (unreleased)
+
+### Upgrading a workspace from 0.1.0
+
+- New `/cw:paper upgrade`: lists what the active workspace lacks against the current templates (deny rules and sandbox paths in `.claude/settings.json`, the current `CLAUDE.md`, the party roster in `paper.json`, missing template files). `/cw:paper upgrade apply` adds them: settings are merged so the author's own rules stay, a replaced `CLAUDE.md` is kept under `.cowriting/upgrade/<time>/`, `party.md`, `scope.md` and the manuscript are never touched. The scaffold tool does the work (`new_paper.py --upgrade [--apply]`), started by the plugin on the host rather than as a tool call, so the guard neither refuses it nor records it as a detected change.
+- Without the upgrade, a 0.1.0 workspace keeps working; it just lacks the `Edit` deny rules and the sandbox of 0.2.0.
+
+### Pre-submission run
+
+- New `/cw:submit [target]`: the Integrity Guardian's check, the consistency report, open markers, the references against Crossref, the AI log's open turns and whether the disclosure is current, as one checklist with locations and the author's next step per item. It logs under the category `integrity`. Readiness is not judged; the findings are for the author.
+
+### Word and LibreOffice manuscripts
+
+- A `.docx` or `.odt` in `manuscript/` is read as text through pandoc: the Read tool answers with the converted text (line ranges work), the word count and the live review use the same conversion, and the guard treats the file like any other. `Grep` cannot search inside such a file, and located feedback names the line of the converted text. Without pandoc the file stays unreadable, and the Read tool answers as before.
 
 ### A review party of your own
 

@@ -37,6 +37,7 @@ const COMMAND_CATEGORY: Readonly<Record<string, string>> = {
   sources: 'literature',
   explain: 'concepts',
   consistency: 'structure',
+  submit: 'integrity',
 }
 
 const bare = (name: string) => name.replace(/^cw:/, '')

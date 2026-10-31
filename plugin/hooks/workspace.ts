@@ -166,7 +166,36 @@ export function appendLog($: $, root: string, entry: LogEntry): Promise<void> {
   })
 }
 
-const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
+/** The files of a manuscript the party reads: text formats, and office files pandoc turns into text. */
+export const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd|docx|odt)$/i
+
+/** A Word or LibreOffice file: read through pandoc, never as bytes. */
+export const CONVERTED_FILE = /\.(docx|odt)$/i
+
+/**
+ * A manuscript file as text: the file itself, or for a Word/LibreOffice file what
+ * pandoc makes of it (Markdown, lines unwrapped). Rejects when pandoc is missing or fails.
+ */
+export async function readText($: $, path: string): Promise<string> {
+  if (!CONVERTED_FILE.test(path)) return $.fs.read(path)
+  const run = await $.process.run(['pandoc', path, '--to', 'markdown', '--wrap=none'], { timeoutMs: 60_000 })
+  if (run.exitCode !== 0) throw new Error(`pandoc could not read ${path}: ${run.stderr.trim() || `exit ${run.exitCode}`}`)
+  return run.stdout
+}
+
+/**
+ * /cw:paper upgrade [apply]: what a workspace from an earlier plugin version lacks,
+ * listed by the scaffold tool; with apply, made. Runs on the host, not as a tool call,
+ * so the guard neither refuses it (the author asked) nor records it as a detected change.
+ */
+export async function upgradePaper($: $, root: string, isApply: boolean): Promise<string> {
+  const tool = join($.plugin.root, 'tools', 'new_paper.py')
+  const run = await $.process.run(['python3', '-I', tool, '--upgrade', ...(isApply ? ['--apply'] : []), '--dir', root], { cwd: root, timeoutMs: 60_000 })
+  if (run.exitCode !== 0) return `Upgrade failed:\n${(run.stderr || run.stdout).trim()}`
+  const report = run.stdout.trim()
+  if (isApply || report.endsWith('nothing to do.')) return report
+  return `${report}\nApply with /cw:paper upgrade apply. Your CLAUDE.md is kept under .cowriting/upgrade/ if it is replaced.`
+}
 
 /** Folders never compared: git's own, and dependencies a build may pull in. */
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules'])
@@ -209,7 +238,7 @@ async function wordsUnder($: $, dir: string, depth: number): Promise<number> {
     if (entry.kind === 'dir') total += await wordsUnder($, path, depth + 1)
     else if (entry.kind === 'file' && MANUSCRIPT_FILE.test(entry.name)) {
       const format = entry.name.toLowerCase().endsWith('.tex') ? 'latex' : 'markdown'
-      total += countWords(await $.fs.read(path), format)
+      total += countWords(await readText($, path).catch(() => ''), format)
     }
   }
   return total
