@@ -15,9 +15,9 @@ CoWriting turns these rules into features:
 
 | Rule | What the plugin does |
 |---|---|
-| You are the author | `manuscript/` is **read-only for Claude**. A hook refuses every edit, including from subagents and shell commands. |
-| Transparency | Every prompt and answer is logged automatically to `ai-log/` (append-only, timestamped, with the model id). |
-| Disclosure | `/cw:disclosure` turns the log into an **AI register** (EN/DE, Markdown/LaTeX) for your declaration of authorship or your journal. |
+| You are the author | `manuscript/` is **read-only for Claude**. A hook refuses the edits it can recognise, including from subagents and shell commands, and records every change to the manuscript it detects during a tool call anyway (see [The manuscript guard](#the-manuscript-guard)). |
+| Transparency | Every prompt and answer is logged automatically to `ai-log/` (append-only, timestamped, with the model and plugin versions). |
+| Disclosure | `/cw:disclosure` turns the log into an **AI register** (EN/DE, Markdown/LaTeX) for your declaration of authorship or your journal, and into a prompts appendix where one is required. |
 | Responsibility | You classify each AI input: **✓ used** (adopted), **✎ changed** (adapted), **✗ not used** (rejected) or **ℹ info**. The card shows who said it, what you asked and what it said. Claude never decides this for you. |
 | No fabricated sources | References need a verified DOI or a citekey from your Zotero export. `verify_refs.py` checks your `.bib` against Crossref. |
 
@@ -28,7 +28,7 @@ The background research and requirements are in [docs/research-and-requirements.
 You need Claude Code (in a terminal or the VS Code extension) and Python 3. At the Claude Code prompt, type:
 
 ```
-/plugin install cw --marketplace <owner>/<repo>
+/plugin install cw --marketplace dozwa/claude-cowriting
 ```
 
 Answer `y` to add the marketplace, then pick a scope (user scope is recommended). The config screen asks for your options. All of them can be changed later in `/config`:
@@ -107,7 +107,7 @@ The CoWriting pane works in the terminal and in the VS Code extension.
 
 | Command | What it does |
 |---|---|
-| `/cw:pane [party\|live\|log\|progress]` | Opens the **CoWriting pane** (on that tab) with the keyboard in it. Click a persona's name to summon it. `1`–`4` switch tabs, `w` turns live review on or off, `r` refreshes, `a`/`d`/`x`/`i` annotate the latest open turn as adopted/adapted/rejected/info, `Esc` goes back to the prompt |
+| `/cw:pane [party\|live\|log\|scope\|progress]` | Opens the **CoWriting pane** (on that tab) with the keyboard in it. Click a persona's name to summon it. `1`–`5` switch tabs, `w` turns live review on or off, `r` refreshes, `a`/`d`/`x`/`i` annotate the latest open turn as adopted/adapted/rejected/info, `Esc` goes back to the prompt |
 | `/cw:watch [on\|off] [persona …\|all]` | **Live review** while you write (see below). Default watchers: Grammar Guy, Terminologist, Style Coach, Architect |
 | `/cw:ask <persona> <question>` | Talk to one persona directly, e.g. `/cw:ask terminologist is "sleep architecture" the usual term?` |
 | `/cw:brief [persona\|all] [text]` | Tell a persona what to look for **in this project**. Without text it interviews you and saves your answers; with text it saves them directly. Without arguments it lists all briefs. |
@@ -121,7 +121,7 @@ The CoWriting pane works in the terminal and in the VS Code extension.
 | `/cw:consistency` | Report on terms, abbreviations, cross-references, citekeys and figures |
 | `/cw:annotate` | Record what you did with an AI input |
 | `/cw:quiet [off\|calm\|focus]` | Switch the focus mode for this session. `ctrl+o` always shows everything in full. |
-| `/cw:disclosure` | Generate the AI register |
+| `/cw:disclosure` | Generate the AI register, and the prompts appendix if your university asks for one (`ailog.py prompts`) |
 | `/cw:scope [check\|edit]` | Progress against your plan in `scope.md`; `check` asks which of your points the text makes; `edit` sets the scope with you |
 | `/cw:paper [path \| number \| name]` | Open a paper folder by path from wherever Claude Code runs, pick a recent one by number, or switch `projects/<name>`; alone, it lists recent papers |
 
@@ -167,6 +167,16 @@ Counting needs no AI. Whether a point is actually *made* does: `/cw:scope check`
 
 You can insist. Claude then marks the passage `[AI-TEXT]`, the log flags it, and the disclosure lists it. Nothing is hidden.
 
+### The manuscript guard
+
+Three layers keep Claude out of `manuscript/`, and each has a known reach:
+
+1. **File tools** (Write, Edit, …) are refused by path. Case is ignored and `..` is resolved, so `Manuscript/` or `notes/../manuscript/` are covered.
+2. **Shell commands** are refused by pattern: a redirect into the folder, a `cd` into it, or a writing command (`sed -i`, `cp`, `--write`, `-o`, an editor, an inline script) with the folder among its words. A pattern can be fooled, by a shell variable, a script file or a symlink.
+3. **After any writing tool ran**, the manuscript's files are compared with how they were before. A change is logged as a `guard` entry with the tool and the files, shown above the prompt, counted in the pane and listed in the disclosure under *Manuscript changes detected during AI tool calls*. Check the git diff when you see one.
+
+The guard refuses what it can recognise and records what it cannot. It does not make an AI write impossible, and the disclosure says exactly that. What it cannot see at all is text you paste from the chat yourself. For that, the `[AI-TEXT]` marker and your own annotations are the record.
+
 ## The review party
 
 ### Briefing the party for your project
@@ -199,8 +209,8 @@ The game rewards **your own writing and your transparency, never AI use**:
 - **Writer XP:** words you add to `manuscript/` (1 XP per 10 words). Only growth above your previous maximum counts, and text that was there before you started is the baseline.
 - **Transparency XP:** annotations, verified references and generated disclosures.
 - **Persona levels:** a persona levels up only when you *act* on its hints (annotated *adopted* or *adapted*). Summoning alone earns nothing.
-- **Achievements:** First 1,000 own words, Seven-day streak, Clean Record, Citation Hunter, Survived Reviewer #2, Full Party, Transparent Scholar…
-- **Overreliance nudge:** the Integrity Guardian speaks up when one persona does most of the work, or AI-written text keeps showing up.
+- **Achievements:** First 1,000 own words, Seven-day streak, Clean Record, Citation Hunter, Survived Reviewer #2, Own Voice (decide against 5 hints), Transparent Scholar… None of them rewards consulting the AI.
+- **Overreliance nudge:** the Integrity Guardian speaks up when one persona does most of the work, AI-written text keeps showing up, or the manuscript changed during an AI tool call.
 
 ## Privacy
 
@@ -218,8 +228,11 @@ CoWriting supports good practice. It doesn't replace the rules of your universit
 claude --plugin-dir plugin          # run Claude Code with the plugin from this folder
 claude plugin validate plugin       # check manifest and hooks
 claude plugin test plugin           # run plugin/tests/*.test.tsx
+python3 -m unittest discover -s plugin/tests -p 'test_*.py'   # the Python tools, disclosure included
 python3 scripts/render_sprites.py   # re-render the persona PNGs and the icon
 ```
+
+CI runs the same three checks on every push. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for adding personas and domain packs.
 

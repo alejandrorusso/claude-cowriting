@@ -34,6 +34,9 @@ Every feature must keep the author the author. Nothing in CoWriting may write ma
 claude --plugin-dir plugin
 claude plugin validate plugin
 claude plugin test plugin
+python3 -m unittest discover -s plugin/tests -p 'test_*.py'
 ```
+
+A change to the manuscript guard needs a case in the guard test, denied or allowed. A change to `ailog.py` needs its line in `test_tools.py`: the disclosure is what an author signs.
 
 Hooks that take `$` must be `function` declarations at the top level of their file; the validator explains why. Pure logic goes in `plugin/hooks/core.ts`, where the tests can reach it without the engine. Python tools use the standard library only.

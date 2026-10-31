@@ -1,6 +1,6 @@
 # Claude Co-Writing Environment: Research & Requirements
 
-*Researched 2026-10-28. Note: this file was compiled by Claude (AI) as a planning document. It is not part of any manuscript.*
+*Researched 2026-10-28, sources re-checked 2026-10-31. Note: this file was compiled by Claude (AI) as a planning document. It is not part of any manuscript. Items marked UNVERIFIED could not be confirmed against the source on 2026-10-31.*
 
 ## 1. Normative framework (DFG and German universities)
 
@@ -12,7 +12,7 @@ Core principles, which still apply to research and writing:
 2. **Responsibility stays with the researcher.** Using AI "kann Wissenschaftlerinnen und Wissenschaftler von dieser inhaltlichen und formalen Verantwortung nicht entbinden" (cannot release researchers from responsibility for content and form).
 3. **Disclosure.** Researchers should disclose "ob und welche generativen Modelle sie zu welchem Zweck und in welchem Umfang eingesetzt haben" (whether they used generative models, which ones, for what purpose, and to what extent).
 4. **Authorship.** Only responsible natural persons can be authors. They must make sure that AI use infringes no third-party IP and leads to no plagiarism.
-5. **Confidentiality.** Review material must not be used as input to AI. In Dec 2025 the DFG revised its position on AI in peer review: since 16 Apr 2026 AI may support peer review under the "Leitlinie zur Nutzung von KI in der Begutachtung" (confidentiality, transparency, quality assurance, responsibility). Overview: <https://www.dfg.de/KI>
+5. **Confidentiality.** Review material must not be used as input to AI. Since December 2025 the 2023 statement no longer applies to AI in peer review: reviewers may use AI under the DFG guideline (DFG-Vordruck 4.04, four principles: purpose, confidentiality, transparency, responsibility) only for support tasks such as structuring their own notes, language revision and reviewing public literature, and only in systems where confidential content is not stored or processed uncontrolled. The DFG pages name no effective date for the guideline; an information event took place on 22 April 2026. Overview: <https://www.dfg.de/KI>, details: <https://www.dfg.de/de/grundlagen-themen/digitale-themen/ki/begutachtung>
 
 ### DFG "KI in der Antragstellung" (current)
 Source: <https://www.dfg.de/de/grundlagen-themen/digitale-themen/ki/antragstellung>
@@ -34,12 +34,12 @@ The Leibniz Association recommendation (Nov 2024) adds that AI output has **no s
 
 | Approach | Idea worth borrowing | Source |
 |---|---|---|
-| **Writor** (2026) | Non-directive, writing-center style feedback. Never writes for the user. Experts rated it equal to or better than chat LLMs. | arXiv 2602.04047 |
-| **Scraft** | Socratic questions to provoke critical thinking. Risk: questions can be off-topic or factually wrong. | arXiv 2304.10543 |
-| **Socratic gatekeeper tutor** (JMIR preprint) | Gives no draft text until the author has engaged substantively. Not validated. | preprints.jmir.org/preprint/106483 |
-| **DAISY** (2026) | Structured disclosure form: tools and versions, data shared, safeguards, human review, authorship boundaries. Produces more complete disclosures. | arXiv 2604.02760 |
-| **"tW" audit trail** | 5-line log entry per AI use: date, purpose, prompt, what was kept or changed, link to the draft. | thesify.substack.com |
-| **Keystroke/temporal provenance research** | Process logs as proof of authorship. Retrospective self-reporting is unreliable, so log automatically. | arXiv 2511.12468, 2609.17883 |
+| **Writor** (Liu, Gallagher, Sterman, August, 2026) | Writing-center pedagogy as design guidelines: goal setting, balanced feedback, conversation, no verbatim text generation. (The claim that experts rated it equal to or better than chat LLMs is UNVERIFIED.) | arXiv 2602.04047 |
+| **Scraft** (Kim, Tan, 2023) | Socratic questions to provoke critical thinking. Pilot with 15 students: useful, but questions can be factually wrong or miss context. | arXiv 2304.10543 |
+| **Socratic gatekeeper tutor** (JMIR preprint) | Gives no draft text until the author has engaged substantively. Not validated. UNVERIFIED: the preprint page returned no content on re-check. | preprints.jmir.org/preprint/106483 |
+| **DAISY** (Ahmetoglu, Constantinides, Cox, 2026) | Structured disclosure form; in a study with 31 authors it produced more complete disclosures without reducing authors' comfort. | arXiv 2604.02760 |
+| **"tW" audit trail** | 5-line log entry per AI use: date, purpose, prompt, what was kept or changed, link to the draft. UNVERIFIED (newsletter, not re-checked). | thesify.substack.com |
+| **Keystroke and timing research** | Typing patterns and editor logs can flag wholesale delegation to AI but struggle to tell ordinary collaboration from unassisted work; the authors present them as detection signals, not proof of authorship. The lesson for us: log the process automatically rather than reconstruct it later. | arXiv 2511.12468 (Mehta et al.), 2609.17883 (Davalos, Zhang) |
 | **Claude Code academic setups** (claude-code-my-workflow, academic-research-skills, paper-writing skill) | CLAUDE.md, slash commands and skills per task. Layering: fixed pipeline → personal style rules → per-project context. Note: most of these *write* text, which contradicts our goal. | GitHub / skill registries |
 
 **Gap:** none of the tools combines *non-writing assistance* + *automatic, complete AI logging* + *a generated disclosure*. That combination is the niche for this environment.

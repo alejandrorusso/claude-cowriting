@@ -12,9 +12,9 @@
 
 | Principle | Source | CoWriting feature |
 |---|---|---|
-| Only responsible natural persons are authors | DFG statement 2023; DFG Code guideline 14 (authorship) | The manuscript guard (`tool.call` hook and deny rules) keeps Claude out of `manuscript/`. Skills and personas give hints, not text. |
+| Only responsible natural persons are authors | DFG statement 2023; DFG Code guideline 14 (authorship) | The manuscript guard (`tool.call` hook and deny rules) refuses the writes into `manuscript/` it can recognise and logs every change it detects during a tool call as a `guard` entry, which the disclosure lists. Skills and personas give hints, not text. |
 | Responsibility can't be delegated to AI | DFG statement 2023 | The author annotates every AI input (adopted / adapted / rejected / info). The disclosure states the author's responsibility. |
-| Disclose which models, for what purpose, to what extent | DFG statement 2023, DFG proposals page | The automatic log stores model id, category, date and tools. `ailog.py disclosure` aggregates purpose, extent, use and chapters. |
+| Disclose which models, for what purpose, to what extent | DFG statement 2023, DFG proposals page; university templates that ask for prompts | The automatic log stores model id, Claude Code and plugin versions, category, date and tools. `ailog.py disclosure` aggregates purpose, extent, use and chapters; `ailog.py prompts` writes the prompts appendix. |
 | Transparency and traceability of the research process | DFG statement 2023; DFG Code guideline 12 (documentation) | Append-only `ai-log/`, the git history of the human-written manuscript, AI notes kept separately and labelled. |
 | No plagiarism, no infringement of intellectual property | DFG statement 2023 | Integrity Guardian, "AI summary – read the original" labels, no quotes without page numbers, `[AI-TEXT]` marker for any AI wording. |
 | Correct referencing, honesty | DFG Code, general principles | No invented references: DOI verification (`verify_refs.py`), citekeys only from the user's own `.bib`, `UNVERIFIED` marking. |
@@ -27,6 +27,7 @@
 
 ## What CoWriting can't do
 
+- It can't make an AI write into `manuscript/` impossible. A shell variable, a script file or a symlink can get past the command patterns. It refuses what it recognises, records what it detects afterwards, and the disclosure says so rather than claiming technical prevention.
 - It can't stop someone from copying AI chat output into the manuscript by hand. It makes that visible instead (`[AI-TEXT]` flags) and makes writing yourself the rewarded path.
 - It doesn't know your institution's rules. Adapt the generated disclosure to them.
 
