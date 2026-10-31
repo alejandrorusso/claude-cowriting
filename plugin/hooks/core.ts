@@ -87,6 +87,8 @@ export const EMPTY_STATS: Stats = {
   personaConsults: {},
   personaAdopted: {},
   annotations: 0,
+  rejected: 0,
+  guardEvents: 0,
   recent: [],
   open: [],
 }
@@ -124,14 +126,16 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
   const prompts = new Map<string, PromptEntry>()
   const responses = new Map<string, ResponseEntry>()
   const annotated = new Map<string, AnnotationEntry>()
+  let guardEvents = 0
   for (const e of entries) {
     if (e.type === 'prompt') prompts.set(e.id, e)
     else if (e.type === 'response') responses.set(e.ref, e)
-    else annotated.set(e.ref, e)
+    else if (e.type === 'annotation') annotated.set(e.ref, e)
+    else if (e.type === 'guard') guardEvents += 1
   }
 
   const day = now.toISOString().slice(0, 10)
-  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [] }
+  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [], guardEvents }
   const turns: RecentTurn[] = []
 
   for (const [id, p] of prompts) {
@@ -175,38 +179,97 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
     })
   }
   stats.annotations = annotated.size
+  stats.rejected = [...annotated.values()].filter(a => a.use === 'rejected').length
   stats.recent = turns.slice(-6).reverse()
   stats.open = turns.filter(t => t.isOpen).slice(-5).reverse()
   return stats
 }
 
 // -------------------------------------------------------------- the guard
+//
+// Three layers, each honest about its reach:
+// 1. File tools (Write, Edit, …) are refused by path: `..` is resolved, case is ignored.
+// 2. Shell commands are refused by pattern. This is a best effort: a variable, a script file or
+//    a symlink can get past it, and the README says so.
+// 3. After any other tool ran, the manuscript's files are compared with how they were before.
+//    A change is logged as a `guard` entry (see `changedFiles`), shown to the author, and listed
+//    in the disclosure. What layer 2 misses, layer 3 records.
 
 const WRITE_PATTERNS = [
-  />>?/,
   /\btee\b/,
   /\bsed\s+(-[a-zA-Z]*i|--in-place)/,
   /\bperl\s+-[a-zA-Z]*i/,
-  /\b(mv|cp|rm|rmdir|truncate|touch|ln|dd|install|rsync)\b/,
+  /\b(mv|cp|rm|rmdir|truncate|touch|ln|dd|install|rsync|patch)\b/,
   /\bgit\s+(checkout|restore|reset|apply|stash|mv|rm|clean)\b/,
   /\bopen\([^)]*['"][wa+]/,
-  /\b(write_text|writeFile|write_bytes)\b/,
-  /\bpandoc\b.*\s-o\s/,
+  /\b(write_text|writeFile|writeFileSync|write_bytes)\b/,
+  /\s-o\s/, // pandoc -o, sort -o, …
+  /\b(vim?|nvim|nano|emacs|ed|ex)\b/,
+  /--(write|in-place|fix|output)\b/,
+  /\b(python3?|node|ruby|perl)\s+-[ce]\b/,
 ]
 
-/** Does this path lie in a `manuscript` folder? */
-export const isManuscriptPath = (path: string): boolean =>
-  /(^|[\\/])manuscript([\\/]|$)/.test(path)
+// a redirect target; a digit before `>` is a file descriptor (2>), not a file
+const REDIRECT = /(?:^|[^0-9&<])>{1,2}\s*['"]?([^\s'"&|;)]+)/g
+const CD = /\bcd\s+['"]?([^\s'";&|]+)/g
 
-/** Would this shell command change a file in a `manuscript` folder? */
-export const bashTouchesManuscript = (command: string): boolean =>
-  /(^|[\s'"=\\/])manuscript([\\/\s'"]|$)/.test(command) &&
-  WRITE_PATTERNS.some(p => p.test(command))
+const globToRegExp = (segment: string) =>
+  new RegExp(`^${segment.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i')
+
+/** The path's folders and file after `.` and `..` are resolved. */
+const segmentsOf = (path: string): string[] => {
+  const out: string[] = []
+  for (const s of path.split(/[\\/]+/)) {
+    if (s === '..') out.pop()
+    else if (s !== '.' && s !== '') out.push(s)
+  }
+  return out
+}
+
+/** Does this path lie in a `manuscript` folder? Case is ignored, `..` resolved, a glob may match it. */
+export const isManuscriptPath = (path: string): boolean =>
+  segmentsOf(path).some(s => (/[*?]/.test(s) ? globToRegExp(s).test('manuscript') : s.toLowerCase() === 'manuscript'))
+
+/**
+ * Would this shell command change a file in a `manuscript` folder, as far as its text shows?
+ * A redirect into the folder, a `cd` into it followed by any redirect or write, or a writing
+ * command with the folder among its words. A variable or a script hiding the path gets past this;
+ * the after-the-fact comparison (`changedFiles`) is for those.
+ */
+export const bashTouchesManuscript = (command: string): boolean => {
+  const targets = [...command.matchAll(REDIRECT)].map(m => m[1]!)
+  if (targets.some(isManuscriptPath)) return true
+  const entersManuscript = [...command.matchAll(CD)].some(m => isManuscriptPath(m[1]!))
+  const writes = WRITE_PATTERNS.some(p => p.test(command))
+  if (entersManuscript && (writes || targets.some(t => !t.startsWith('/dev/')))) return true
+  const mentions = /(^|[^a-z0-9_-])manuscript([^a-z0-9_-]|$)/i.test(command)
+  return mentions && writes
+}
 
 export const GUARD_MESSAGE =
   'CoWriting: the manuscript/ folder is written by its human author only (DFG good scientific practice: ' +
   'only natural persons are authors). Give located feedback, questions or corrected example sentences in the chat instead; ' +
   'the author decides what goes into the text.'
+
+/** Manuscript files by relative path → `mtime:size`, as they were at one moment. */
+export type Fingerprint = Readonly<Record<string, string>>
+
+/** The files that differ between two fingerprints: changed, added or removed. */
+export const changedFiles = (before: Fingerprint, after: Fingerprint): string[] =>
+  [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(f => before[f] !== after[f]).sort()
+
+/** Tools that only read; the manuscript is not compared around them. */
+export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'Read', 'Glob', 'Grep', 'LS', 'WebFetch', 'WebSearch', 'TodoWrite', 'TodoRead', 'AskUserQuestion', 'ToolSearch',
+  // a subagent's call lasts minutes while the author may write; its own tool calls are watched one by one
+  'Agent', 'Task', 'Monitor',
+])
+
+/** What a guard entry records of the call: the command, or the file it named. */
+export const guardInputOf = (tool: string, input: Readonly<Record<string, unknown>>): string =>
+  String(input.command ?? input.file_path ?? input.notebook_path ?? input.description ?? '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 200)
 
 // ------------------------------------------------------------- the words
 
@@ -251,7 +314,7 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
   { id: 'clean-record', title: 'Clean Record', detail: '10+ AI turns, every one annotated' },
   { id: 'citation-hunter', title: 'Citation Hunter', detail: '20+ references verified by DOI' },
   { id: 'survived-r2', title: 'Survived Reviewer #2', detail: 'Act on 3 hints of Reviewer #2' },
-  { id: 'full-party', title: 'Full Party', detail: 'Consult every core persona once' },
+  { id: 'own-voice', title: 'Own Voice', detail: 'Decide against 5 AI hints and say so' },
   { id: 'transparent', title: 'Transparent Scholar', detail: 'Generate your AI disclosure' },
 ]
 
@@ -309,7 +372,8 @@ export const advanceGame = (
     'clean-record': stats.turns >= 10 && stats.unannotated === 0,
     'citation-hunter': game.verifiedRefs >= 20,
     'survived-r2': (stats.personaAdopted['reviewer-2'] ?? 0) >= 3,
-    'full-party': PERSONAS.filter(p => p.pack === 'core').every(p => (stats.personaConsults[p.id] ?? 0) > 0),
+    // rewards the author's judgement, not AI use: a rejected hint is a decision, recorded
+    'own-voice': stats.rejected >= 5,
     transparent: game.disclosures > 0,
   }
   const unlocked = ACHIEVEMENTS.filter(a => earned[a.id] && !game.achievements.includes(a.id))
@@ -331,6 +395,9 @@ export const advanceGame = (
 
 /** A gentle nudge when the help starts to outweigh the writing. */
 export const overrelianceNudge = (stats: Stats): string | undefined => {
+  if (stats.guardEvents > 0) {
+    return `${stats.guardEvents} change(s) to manuscript/ happened during AI tool calls. Check the git history; what you keep must be disclosed.`
+  }
   if (stats.aiText >= 3) {
     return `${stats.aiText} answers contained AI-written text. Disclose them, and try writing the next passage yourself first.`
   }

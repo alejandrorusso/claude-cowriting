@@ -24,6 +24,10 @@ export type ResponseEntry = {
   ref: string
   ts: string
   model: string
+  /** the CoWriting plugin version that logged the turn */
+  plugin?: string
+  /** the Claude Code version the session ran on */
+  claude_code?: string
   personas: string[]
   /** subagents this turn launched as personas: agentId → persona id */
   agents?: Record<string, string>
@@ -42,7 +46,26 @@ export type AnnotationEntry = {
   category?: string
 }
 
-export type LogEntry = PromptEntry | ResponseEntry | AnnotationEntry
+/**
+ * A change to manuscript files that happened while one of Claude's tool calls ran. The guard
+ * refuses the writes it can recognise; this records every change it could not prevent, so the
+ * git history and the disclosure can account for it.
+ */
+export type GuardEntry = {
+  type: 'guard'
+  ts: string
+  session: string
+  paper: string
+  /** the turn the tool call belonged to, if one was open */
+  ref?: string
+  tool: string
+  /** the command or the file argument, shortened */
+  input: string
+  /** manuscript files that changed, relative to the paper folder */
+  files: string[]
+}
+
+export type LogEntry = PromptEntry | ResponseEntry | AnnotationEntry | GuardEntry
 
 export type RecentTurn = {
   id: string
@@ -71,6 +94,10 @@ export type Stats = {
   personaConsults: Record<string, number>
   personaAdopted: Record<string, number>
   annotations: number
+  /** AI inputs the author decided against */
+  rejected: number
+  /** manuscript changes detected during Claude's tool calls (guard entries) */
+  guardEvents: number
   recent: RecentTurn[]
   /** turns waiting to be classified, newest first (at most 5) */
   open: RecentTurn[]

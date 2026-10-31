@@ -9,12 +9,14 @@ import {
   bashTouchesManuscript,
   briefFor,
   categoryFor,
+  changedFiles,
   changedParagraphs,
   changedPaths,
   computeStats,
   countWords,
   isManuscriptPath,
   limitCrossed,
+  overrelianceNudge,
   parseBriefs,
   parseHints,
   parseLog,
@@ -26,6 +28,7 @@ import {
 import { PERSONAS, SHARED_PALETTE } from '../hooks/personas'
 import { parseCheck, parseScope, scopeProgress } from '../hooks/scope'
 import { rasterCells, svgSource } from '../hooks/sprites'
+import { withLog } from '../hooks/workspace'
 
 const ROOT = '/w'
 
@@ -91,12 +94,45 @@ test('the guard spots writes into manuscript/ and lets reads through', async () 
   expect(isManuscriptPath('/w/manuscript/main.tex')).toBe(true)
   expect(isManuscriptPath('/w/projects/a/manuscript/ch1/intro.md')).toBe(true)
   expect(isManuscriptPath('/w/notes/ai/manuscript-notes.md')).toBe(false)
-  expect(bashTouchesManuscript('echo hi > manuscript/main.md')).toBe(true)
-  expect(bashTouchesManuscript("sed -i '' 's/a/b/' manuscript/main.tex")).toBe(true)
-  expect(bashTouchesManuscript('git checkout -- manuscript/main.tex')).toBe(true)
-  expect(bashTouchesManuscript('cat manuscript/main.tex')).toBe(false)
-  expect(bashTouchesManuscript('grep -n cite manuscript/*.tex')).toBe(false)
-  expect(bashTouchesManuscript('echo hi > notes/ai/x.md')).toBe(false)
+  expect(isManuscriptPath('Manuscript/main.md')).toBe(true) // macOS ignores case
+  expect(isManuscriptPath('notes/../manuscript/main.md')).toBe(true)
+  expect(isManuscriptPath('manuscript/../notes/ai/x.md')).toBe(false)
+  expect(isManuscriptPath('manus*/main.md')).toBe(true)
+  expect(isManuscriptPath('manuscripts/main.md')).toBe(false)
+
+  const denied = [
+    'echo hi > manuscript/main.md',
+    'cat notes.md >> manuscript/main.md',
+    'cat << EOF > manuscript/main.md\nhello\nEOF',
+    "sed -i '' 's/a/b/' manuscript/main.tex",
+    'git checkout -- manuscript/main.tex',
+    'cp a.md manuscript/',
+    'cd manuscript && echo x > main.md',
+    'echo x > Manuscript/main.md',
+    'echo x > manus*/main.md',
+    'npx prettier --write manuscript/main.md',
+    'pandoc notes.md -o manuscript/main.md',
+    'sort -o manuscript/main.md manuscript/main.md',
+    'vim -c "wq" manuscript/main.md',
+    'python3 -c "open(\'manuscript/main.md\',\'w\').write(\'x\')"',
+  ]
+  for (const command of denied) expect(bashTouchesManuscript(command), command).toBe(true)
+  const allowed = [
+    'cat manuscript/main.tex',
+    'cat manuscript/main.md 2>/dev/null',
+    'wc -w manuscript/*.md > /dev/null',
+    'grep -n cite manuscript/*.tex | head -5',
+    'git log --oneline -- manuscript',
+    'python3 tools/style_profile.py literature/style-models manuscript',
+    'echo hi > notes/ai/x.md',
+    'echo "see manuscript/" > notes/ai/todo.md',
+    'git commit -F msg.txt',
+  ]
+  for (const command of allowed) expect(bashTouchesManuscript(command), command).toBe(false)
+  // what the text cannot show is left to the comparison after the call
+  expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '2:12' })).toEqual(['manuscript/main.tex'])
+  expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '1:10', 'manuscript/new.tex': '3:1' })).toEqual(['manuscript/new.tex'])
+  expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '1:10' })).toEqual([])
 })
 
 test('words are counted without LaTeX and Markdown syntax', async () => {
@@ -143,6 +179,11 @@ test('XP rewards own words and transparency, not AI turns', async () => {
   expect(after.personaAdopted['reviewer-2']).toBe(1)
   expect(advanceGame(later.game, 1700, after, '2026-10-29').personaLevels['reviewer-2']).toBe(2)
   expect(ACHIEVEMENTS.length).toBeGreaterThan(5)
+
+  // no achievement rewards consulting the AI; deciding against it is rewarded
+  expect(ACHIEVEMENTS.map(a => a.id)).not.toContain('full-party')
+  const independent = advanceGame(later.game, 1700, { ...after, rejected: 5 }, '2026-10-29')
+  expect(independent.unlocked.map(a => a.id)).toContain('own-voice')
 })
 
 // ------------------------------------------------------------- the hooks
@@ -161,6 +202,61 @@ test('the plugin refuses edits to the manuscript and allows notes', async ($, on
   expect(bash.deny).toContain('CoWriting')
   const read = await $.tool.call({ tool: 'Bash', command: 'cat manuscript/main.tex' })
   expect(read.deny).toBeUndefined()
+})
+
+test('a manuscript change during a tool call is logged as a guard event and shown', async ($, on) => {
+  const files = paperFiles()
+  const main = `${ROOT}/manuscript/main.tex`
+  const mtimes = new Map<string, number>([[main, 1]])
+  workspace(on, files)
+  on('fs.stat', (_: unknown, e: { path: string }) => ({
+    value: { kind: 'file', size: files.get(e.path)?.length ?? 0, mtimeMs: mtimes.get(e.path) ?? 0, isLink: false },
+  }))
+  on('tool.call', (_: unknown, e: { tool: string; command?: string }) => {
+    if (e.tool === 'Bash' && e.command === 'python3 fix.py') {
+      files.set(main, '\\section{Intro}\nRewritten by a script the patterns could not see.')
+      mtimes.set(main, 2)
+    }
+    return { result: {} }
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  const sneaky = await $.tool.call({ tool: 'Bash', command: 'python3 fix.py' })
+  expect(sneaky.deny).toBeUndefined() // nothing in the text gave it away
+  const logOf = () => {
+    const logFile = [...files.keys()].find(k => k.startsWith(`${ROOT}/ai-log/`))
+    return logFile === undefined ? [] : parseLog(files.get(logFile)!)
+  }
+  for (let i = 0; i < 50 && !logOf().some(e => e.type === 'guard'); i++) await new Promise(r => setTimeout(r, 1))
+  const guard = logOf().find(e => e.type === 'guard')
+  expect(guard?.type === 'guard' && guard.files).toEqual(['manuscript/main.tex'])
+  expect(guard?.type === 'guard' && guard.input).toBe('python3 fix.py')
+
+  const stats = computeStats(logOf(), new Date())
+  expect(stats.guardEvents).toBe(1)
+  expect(overrelianceNudge(stats)).toContain('manuscript/')
+
+  // a reading tool is not compared, so the author's own edit meanwhile is not blamed on it
+  files.set(main, `${files.get(main)}\nThe author typed this.`)
+  mtimes.set(main, 3)
+  await $.tool.call({ tool: 'Read', file_path: `${ROOT}/notes/ai/x.md` })
+  await new Promise(r => setTimeout(r, 5))
+  expect(logOf().filter(e => e.type === 'guard').length).toBe(1)
+})
+
+test('log writes of one paper run one after another, in order', async () => {
+  // the log is read and rewritten on each append, so two writes in flight would lose one
+  const order: string[] = []
+  const write = (name: string, ms: number) =>
+    withLog('/w', async () => {
+      await new Promise(r => setTimeout(r, ms))
+      order.push(name)
+    })
+  await Promise.all([write('one', 10), write('two', 1), write('three', 0)])
+  expect(order).toEqual(['one', 'two', 'three'])
+  // a failed write does not block the next
+  await withLog('/w', async () => Promise.reject(new Error('disk'))).catch(() => undefined)
+  expect(await withLog('/w', async () => 'next')).toBe('next')
 })
 
 test('a turn is logged as linked prompt and response, with the AI-text flag', async ($, on) => {

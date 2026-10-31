@@ -8,6 +8,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GameFile, LogEntry, Paper } from '../types'
 import { BRIEF_FILE, NEW_GAME, countWords, monthFile, parseBriefs, parseLog, setBrief } from './core'
+import type { Fingerprint } from './core'
 
 type $ = EngineInterface
 
@@ -72,15 +73,59 @@ export async function readLog($: $, root: string): Promise<LogEntry[]> {
   return entries
 }
 
+// The versions every response entry names, set once the session knows them.
+let versions: { plugin?: string; claude_code?: string } = {}
+export const setLogVersions = (v: { plugin?: string; claude_code?: string }) => {
+  versions = { ...v }
+}
+
+// One writer at a time per paper: the log is appended by reading and rewriting the month's
+// file (the engine's fs has no append), so two appends in flight would lose one.
+const queues = new Map<string, Promise<unknown>>()
+
+/** Runs `fn` after every earlier log write of this paper has finished, before any later one. */
+export function withLog<T>(root: string, fn: () => Promise<T>): Promise<T> {
+  const previous = queues.get(root) ?? Promise.resolve()
+  const run = previous.then(fn, fn)
+  queues.set(root, run.catch(() => undefined))
+  return run
+}
+
 /** Append one entry to this month's log file (append-only by content). */
-export async function appendLog($: $, root: string, entry: LogEntry): Promise<void> {
-  const path = join(root, 'ai-log', monthFile(new Date()))
-  const before = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
-  const sep = before === '' || before.endsWith('\n') ? '' : '\n'
-  await $.fs.write(path, `${before}${sep}${JSON.stringify(entry)}\n`)
+export function appendLog($: $, root: string, entry: LogEntry): Promise<void> {
+  const stamped = entry.type === 'response' ? { ...entry, ...versions } : entry
+  return withLog(root, async () => {
+    const path = join(root, 'ai-log', monthFile(new Date()))
+    const before = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
+    const sep = before === '' || before.endsWith('\n') ? '' : '\n'
+    await $.fs.write(path, `${before}${sep}${JSON.stringify(stamped)}\n`)
+  })
 }
 
 const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
+
+/** Every file under the paper's manuscript folder, a few levels deep. */
+export async function listManuscriptFiles($: $, dir: string, depth = 0): Promise<string[]> {
+  if (depth > 4 || !(await $.fs.exists(dir))) return []
+  const out: string[] = []
+  for (const entry of await $.fs.list(dir)) {
+    const path = join(dir, entry.name)
+    if (entry.kind === 'dir') out.push(...(await listManuscriptFiles($, path, depth + 1)))
+    else if (entry.kind === 'file') out.push(path)
+  }
+  return out
+}
+
+/** The manuscript's files as they are now: relative path → `mtime:size`. */
+export async function fingerprintManuscript($: $, paper: Paper): Promise<Fingerprint> {
+  const dir = join(paper.root, 'manuscript')
+  const out: Record<string, string> = {}
+  for (const path of await listManuscriptFiles($, dir)) {
+    const stat = await $.fs.stat(path).catch(() => null)
+    if (stat !== null) out[path.slice(paper.root.length + 1)] = `${stat.mtimeMs}:${stat.size}`
+  }
+  return out
+}
 
 async function wordsUnder($: $, dir: string, depth: number): Promise<number> {
   if (depth > 4 || !(await $.fs.exists(dir))) return 0

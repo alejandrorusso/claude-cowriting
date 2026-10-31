@@ -11,11 +11,14 @@ import {
   usageParts,
   usageShort,
   GUARD_MESSAGE,
+  READ_ONLY_TOOLS,
   advanceGame,
   bashTouchesManuscript,
   briefFor,
   categoryFor,
+  changedFiles,
   computeStats,
+  guardInputOf,
   handBackAgentId,
   WATCH_DEFAULT,
   isManuscriptPath,
@@ -32,13 +35,16 @@ import {
   appendLog,
   describePapers,
   findPaper,
+  fingerprintManuscript,
   manuscriptWords,
   readGame,
   readLog,
   readBriefs,
   readToolCounts,
   openPaper,
+  setLogVersions,
   targetFolder,
+  withLog,
   writeBrief,
   writeGame,
 } from './workspace'
@@ -178,12 +184,44 @@ async function focusMode($: $, cfg: Config): Promise<FocusMode> {
 async function annotate($: $, cfg: Config, ref: string, use: string): Promise<void> {
   const snapshot = await read($, snapshotAtom)
   if (snapshot.paper === null) return
-  const ran = await $.process.run(
-    ['python3', `${$.plugin.root}/tools/ailog.py`, 'annotate', ref, '--use', use],
-    { cwd: snapshot.paper.root },
+  const root = snapshot.paper.root
+  // the tool appends to the same file the hooks write: one writer at a time
+  const ran = await withLog(root, () =>
+    $.process.run(['python3', `${$.plugin.root}/tools/ailog.py`, 'annotate', ref, '--use', use], { cwd: root }),
   )
   $.ui.toast(ran.exitCode === 0 ? `Annotated as ${use}` : `Annotation failed: ${ran.stderr.slice(0, 80)}`)
   await refresh($, cfg)
+}
+
+/** A manuscript change during a tool call: logged, shown, and from then on in the disclosure. */
+async function reportGuard($: $, cfg: Config, paper: Paper, tool: string, input: string, files: string[]): Promise<void> {
+  await appendLog($, paper.root, {
+    type: 'guard',
+    ts: new Date().toISOString(),
+    session: await $.session.id(),
+    paper: paper.name,
+    ...(turn !== null ? { ref: turn.id } : {}),
+    tool,
+    input,
+    files,
+  }).catch(() => undefined)
+  $.ui.toast(`⚠ manuscript/ changed while ${tool} ran: ${files.join(', ')}. Logged; check git diff.`)
+  await update($, bandHiddenAtom, () => false)
+  await refresh($, cfg).catch(() => undefined)
+}
+
+/** The plugin's version from its manifest, and the engine's, for the log. */
+async function readVersions($: $): Promise<{ plugin?: string; claude_code?: string }> {
+  const out: { plugin?: string; claude_code?: string } = {}
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: string }
+    if (typeof manifest.version === 'string') out.plugin = manifest.version
+  } catch {
+    // no manifest to read: the entry goes without
+  }
+  const engine = await $.session.version().catch(() => null)
+  if (engine !== null) out.claude_code = engine.version
+  return out
 }
 
 /**
@@ -326,6 +364,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    setLogVersions(await readVersions($))
     if ((await read($, watchAtom)).isOn) startWatching($, cfg) // a reload keeps watching
     autosaveTimer?.cancel()
     autosaveTimer = cfg.isAutosave ? $.clock.every(AUTOSAVE_TICK_MS, () => void autosaveStep($, cfg)) : null
@@ -522,7 +561,7 @@ export const register: Register = (on, options) => {
     return result
   }).catch(($, e, next) => next(e))
 
-  on('tool.call', ($, e, next) => {
+  on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)
     const input = e as unknown as Record<string, unknown>
     const path = String(input.file_path ?? input.notebook_path ?? '')
@@ -536,7 +575,19 @@ export const register: Register = (on, options) => {
       const agent = personaById(String(input.subagent_type ?? ''))
       if (agent !== undefined) turn.personas.add(agent.id)
     }
-    return next(e)
+    if (READ_ONLY_TOOLS.has(tool)) return next(e)
+
+    // The patterns above can be fooled; the manuscript cannot. Whatever changed in it while this
+    // call ran is recorded, shown and disclosed, so the git history can be read against it.
+    const paper = await findPaper($, pack).catch(() => null)
+    if (paper === null) return next(e)
+    const before = await fingerprintManuscript($, paper).catch(() => null)
+    const result = await next(e)
+    if (before === null) return result
+    const after = await fingerprintManuscript($, paper).catch(() => null)
+    const files = after === null ? [] : changedFiles(before, after)
+    if (files.length > 0) void reportGuard($, cfg, paper, tool, guardInputOf(tool, input), files)
+    return result
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'CoWriting: the manuscript guard failed, so the call was refused.' }))
 
   // Subagents start through agent.spawn, not tool.call: this is where a summoned persona is counted.
