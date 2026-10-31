@@ -22,7 +22,7 @@ Target folder: `$ARGUMENTS` if given (a path, `~` allowed; it must exist), else 
    It never overwrites existing files and runs `git init` if the folder is not a repository. With a target folder, run every later shell command from it (`cd "<target folder>" && …`) and use absolute paths under it.
    If the output lists text outside the manuscript folder (`!` lines), tell the author to move those files into `manuscript/` themselves, in place of the skeleton file if they like. Don't move them yourself.
 3. Show what was created and explain the next steps briefly:
-   - Zotero: in Zotero, right-click your collection → *Export Collection…* → format **Better BibLaTeX**, tick **Keep updated**, save as `literature/references.bib`.
+   - Zotero: in Zotero, right-click your collection → *Export Collection…* → format **Better BibLaTeX**, tick **Keep updated**, save as `literature/references.bib`. Another reference manager (Mendeley, EndNote, Citavi, Paperpile, JabRef): export BibTeX, CSL JSON or RIS into `literature/`; PubMed: the `.nbib` export. All of them are read for the library search and the DOI check; citekeys for the text come from `.bib` and CSL JSON only.
    - Write only in `manuscript/`; Claude can read but never change it. An author who writes in Word or LibreOffice puts the `.docx`/`.odt` there (Markdown format for the workspace); the party reads it through pandoc, which must be installed.
    - `/cw:pane` opens the pane with the review party; `/cw:summon <persona>` asks one of them for a review, `/cw:ask <persona> <question>` asks it anything, `/cw:party` shows and changes who is in it.
    - From another folder, `/cw:paper <path>` opens this paper again; `/cw:paper` alone lists recent papers.

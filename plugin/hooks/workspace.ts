@@ -261,7 +261,10 @@ export async function writeGame($: $, root: string, game: GameFile): Promise<voi
 
 /** Counts the tools write: verified references and generated disclosures. */
 export async function readToolCounts($: $, root: string) {
-  const verify = await readJson<{ ok?: number }>($, join(root, 'literature', '.verify.json'))
+  // 0.2.0 writes the summary in Claude's place; a run before that left it in literature/
+  const verify =
+    (await readJson<{ ok?: number }>($, join(root, '.cowriting', 'verify.json'))) ??
+    (await readJson<{ ok?: number }>($, join(root, 'literature', '.verify.json')))
   const disclosureDir = join(root, 'disclosure')
   const disclosures = (await $.fs.exists(disclosureDir))
     ? (await $.fs.list(disclosureDir)).filter(f => f.name.startsWith('ai-register')).length

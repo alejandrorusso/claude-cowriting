@@ -103,7 +103,7 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
     '- Give located feedback (file:line), Socratic questions, structure and argument critique, explanations, literature help, checklists and overviews.',
     '- Language exception: for grammar, spelling and punctuation you may show the corrected sentence together with the rule. No stylistic rewrites.',
     `- If the author explicitly insists on text written by you, start that text with ${AI_TEXT_MARKER} and remind them it must be disclosed.`,
-    '- Never invent references. Cite only with a verified DOI/URL or a citekey present in literature/*.bib; mark anything else UNVERIFIED.',
+    '- Never invent references. Cite only with a verified DOI/URL or a citekey present in the bibliography under literature/; mark anything else UNVERIFIED.',
     '- Label literature summaries as "AI summary – read the original". No direct quotes without page numbers from the source.',
     '- Put AI notes only in notes/ai/ (header: "AI-generated (Claude), <date>, not manuscript text").',
     vault !== ''

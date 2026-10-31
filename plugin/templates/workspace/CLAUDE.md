@@ -16,7 +16,7 @@ This is a writing workspace of the **CoWriting** plugin. The human author writes
 - If the author explicitly insists on AI-written text, it starts with `[AI-TEXT]`. It is logged and must be disclosed.
 - **Sources:**
   - Never invent references.
-  - Cite only verified DOIs or URLs, or citekeys present in `literature/*.bib`. Anything else is marked `UNVERIFIED`.
+  - Cite only verified DOIs or URLs, or citekeys present in the bibliography under `literature/`. Anything else is marked `UNVERIFIED`.
   - Summaries are labelled "AI summary – read the original".
   - No quotes without page numbers.
 - No confidential review material and no unpublished third-party data go into prompts.
@@ -27,7 +27,7 @@ This is a writing workspace of the **CoWriting** plugin. The human author writes
 | Path | Who writes | What |
 |---|---|---|
 | `manuscript/` | author only | the paper ({{format}}) |
-| `literature/` | author; `references.bib` by Zotero (Better BibTeX auto-export) | references, model papers |
+| `literature/` | author; the bibliography exported by the reference manager (`.bib`, CSL JSON, RIS, PubMed `.nbib`) | references, model papers |
 | `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/` | author only | the rules, the party's briefing, the settings |
 | `notes/ai/` | Claude | marked AI notes |
 | `party/` | Claude, from the author's answers (`/cw:party new`); the author may edit | the author's own review experts, one `<id>.md` each; `paper.json` lists the catalogue members |

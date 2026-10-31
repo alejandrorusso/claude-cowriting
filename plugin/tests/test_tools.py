@@ -9,6 +9,8 @@ says is checked word by word where it matters.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -21,6 +23,7 @@ TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(TOOLS))
 
 import ailog  # noqa: E402
+import bibliography  # noqa: E402
 import verify_refs  # noqa: E402
 import zotero_search  # noqa: E402
 
@@ -302,6 +305,112 @@ class PureFunctions(unittest.TestCase):
                 os.chdir(before)
         self.assertEqual([h["citekey"] for h in hits], ["smith2020sleep"])
         self.assertEqual(hits[0]["doi"], "10.1/abc")
+
+
+BIB = (
+    "@article{smith2020sleep,\n  title = {Sleep and memory},\n  author = {Smith, A and Lee, B},\n  year = {2020},\n  doi = {https://doi.org/10.1/abc}\n}\n"
+    "@book{jones2019walk,\n  title = {Walking breaks},\n  author = {Jones, B},\n  date = {2019-03-01}\n}\n"
+)
+CSL = json.dumps([
+    {"id": "miller2021", "type": "article-journal", "title": "Coffee and attention", "DOI": "10.2/coffee",
+     "author": [{"family": "Miller", "given": "C"}, {"literal": "The Coffee Consortium"}], "issued": {"date-parts": [[2021, 5]]}},
+    {"id": "nodoi2018", "type": "chapter", "title": "A chapter without a DOI", "author": [{"family": "Novak"}], "issued": {"raw": "2018"}},
+])
+RIS = (
+    "TY  - JOUR\nAU  - Garcia, M.\nAU  - Huang, L.\nTI  - Walking and mood\nPY  - 2022/01/01/\nDO  - 10.3/walk\nER  - \n\n"
+    "TY  - JOUR\nAU  - Garcia, M.\nTI  - Walking and sleep\nPY  - 2022\nUR  - https://doi.org/10.3/sleep\nN1  - doi: 10.3/sleep\nER  - \n"
+)
+NBIB = (
+    "PMID- 12345\nTI  - Headache and screen time in\n      adolescents.\nFAU - Schmidt, Anna\nAU  - Schmidt A\nDP  - 2023 Feb 3\n"
+    "AID - 10.4/head [doi]\nAID - S0001 [pii]\nPT  - Journal Article\n\n"
+)
+
+
+class Bibliography(unittest.TestCase):
+    def write(self, tmp: str) -> Path:
+        lit = Path(tmp) / "literature"
+        lit.mkdir()
+        (lit / "references.bib").write_text(BIB, encoding="utf-8")
+        (lit / "zotero.json").write_text(CSL, encoding="utf-8")
+        (lit / "endnote.ris").write_text(RIS, encoding="utf-8")
+        (lit / "pubmed.nbib").write_text(NBIB, encoding="utf-8")
+        (lit / ".verify.json").write_text("{}", encoding="utf-8")
+        (lit / "notes.txt").write_text("not a bibliography", encoding="utf-8")
+        return lit
+
+    def test_every_format_comes_out_as_the_same_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lit = self.write(tmp)
+            self.assertEqual([p.name for p in bibliography.find_files(lit)], ["endnote.ris", "pubmed.nbib", "references.bib", "zotero.json"])
+            by_key = {e["key"]: e for e in bibliography.load_all(lit)}
+        self.assertEqual(by_key["smith2020sleep"]["doi"], "10.1/abc", "the doi.org prefix is stripped")
+        self.assertEqual(by_key["smith2020sleep"]["authors"], ["Smith", "Lee"])
+        self.assertEqual(by_key["jones2019walk"]["year"], "2019", "BibLaTeX date gives the year")
+        self.assertEqual((by_key["miller2021"]["doi"], by_key["miller2021"]["year"], by_key["miller2021"]["authors"]), ("10.2/coffee", "2021", ["Miller", "The Coffee Consortium"]))
+        self.assertEqual(by_key["nodoi2018"]["year"], "2018")
+        self.assertFalse(by_key["miller2021"]["derived"])
+        self.assertEqual((by_key["garcia2022"]["doi"], by_key["garcia2022"]["title"], by_key["garcia2022"]["derived"]), ("10.3/walk", "Walking and mood", True))
+        self.assertEqual(by_key["garcia2022b"]["doi"], "10.3/sleep", "a DOI in a URL or note line is found; colliding derived keys get a letter")
+        self.assertEqual((by_key["pmid:12345"]["doi"], by_key["pmid:12345"]["year"], by_key["pmid:12345"]["authors"]), ("10.4/head", "2023", ["Schmidt"]))
+        self.assertEqual(by_key["pmid:12345"]["title"], "Headache and screen time in adolescents.", "continuation lines are joined")
+
+    def test_verify_checks_every_file_and_asks_by_title_where_the_doi_is_missing(self) -> None:
+        records = {
+            "10.1/abc": {"title": ["Sleep and memory"], "issued": {"date-parts": [[2020]]}},
+            "10.2/coffee": {"title": ["Tea and attention"], "issued": {"date-parts": [[2021]]}},
+            "10.3/walk": None,
+            "10.3/sleep": {"title": ["Walking and sleep"], "issued": {"date-parts": [[2022]]}},
+            "10.4/head": {"title": ["Headache and screen time in adolescents"], "issued": {"date-parts": [[2023]]}},
+        }
+        asked = []
+
+        def fake_lookup(title, authors, year, mailto):
+            asked.append((title, authors, year))
+            return {"DOI": "10.9/found"} if "chapter" in title else None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lit = self.write(tmp)
+            before, argv = os.getcwd(), sys.argv
+            os.chdir(tmp)
+            sys.argv = ["verify_refs.py"]
+            verify_refs.crossref, verify_refs.lookup, sleep = lambda doi, mailto: records[doi], fake_lookup, verify_refs.time.sleep
+            verify_refs.time.sleep = lambda s: None
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
+                    verify_refs.main()
+            finally:
+                os.chdir(before)
+                sys.argv = argv
+                verify_refs.time.sleep = sleep
+            summary = json.loads((Path(tmp) / ".cowriting" / "verify.json").read_text(encoding="utf-8"))
+            self.assertEqual((lit / ".verify.json").read_text(encoding="utf-8"), "{}", "nothing is written into the author's folder")
+        text = out.getvalue()
+        self.assertEqual(stop.exception.code, 1, "a mismatch or a missing record fails the run")
+        self.assertEqual({k: summary[k] for k in ("ok", "mismatch", "not_found", "no_doi", "suggested", "error")},
+                         {"ok": 3, "mismatch": 1, "not_found": 1, "no_doi": 2, "suggested": 1, "error": 0})
+        self.assertEqual(summary["files"], ["endnote.ris", "pubmed.nbib", "references.bib", "zotero.json"])
+        self.assertIn("## zotero.json  (CSL JSON, 2 entries)", text)
+        self.assertIn("MISMATCH   miller2021  10.2/coffee", text)
+        self.assertIn("NOT FOUND  (garcia2022)  10.3/walk", text)
+        self.assertIn("NO DOI     nodoi2018  Crossref lists doi:10.9/found for a title like this: check that it is this work", text)
+        self.assertIn("NO DOI     jones2019walk\n", text)
+        self.assertIn("Keys in parentheses are derived", text)
+        self.assertEqual(sorted(a[0] for a in asked), ["A chapter without a DOI", "Walking breaks"])
+
+    def test_library_search_falls_back_to_every_bibliography_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write(tmp)
+            before = os.getcwd()
+            os.chdir(tmp)
+            try:
+                walking = zotero_search.from_bib("walking", 10)
+                coffee = zotero_search.from_bib("coffee consortium", 10)
+            finally:
+                os.chdir(before)
+        self.assertEqual(sorted(h["title"] for h in walking), ["Walking and mood", "Walking and sleep", "Walking breaks"])
+        self.assertEqual({h["citekey"] for h in walking}, {"jones2019walk", None}, "RIS records have no citekey to offer")
+        self.assertEqual((coffee[0]["citekey"], coffee[0]["authors"], coffee[0]["doi"]), ("miller2021", "Miller, The Coffee Consortium", "10.2/coffee"))
 
 
 class StyleProfile(unittest.TestCase):

@@ -3,8 +3,8 @@
 
 Uses the Zotero 7 local API (Zotero running, and "Allow other applications on
 this computer to communicate with Zotero" enabled in Settings → Advanced).
-Falls back to searching literature/*.bib in the current paper.
-Standard library only.
+Falls back to the bibliography files under literature/ of the current paper
+(BibTeX, CSL JSON, RIS, PubMed .nbib; see bibliography.py). Standard library only.
 
     python3 zotero_search.py "self-determination theory" [--limit 15]
 """
@@ -15,8 +15,12 @@ import argparse
 import json
 import re
 import urllib.parse
+import sys
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bibliography  # noqa: E402
 
 API = "http://localhost:23119/api/users/0/items"
 
@@ -48,15 +52,17 @@ def from_zotero(query: str, limit: int) -> list[dict] | None:
 
 
 def from_bib(query: str, limit: int) -> list[dict]:
+    """Search the bibliography files under literature/ (BibTeX, CSL JSON, RIS, PubMed)."""
     words = [w.lower() for w in query.split()]
     out = []
-    for bib in sorted(Path("literature").glob("*.bib")) if Path("literature").exists() else []:
-        for key, body in re.findall(r"@\w+\s*\{\s*([^,\s]+)\s*,(.*?)\n\}", bib.read_text(encoding="utf-8"), re.S):
-            if all(w in body.lower() for w in words):
-                def f(name: str) -> str:
-                    m = re.search(rf"\b{name}\s*=\s*[{{\"](.*?)[}}\"]\s*,?\s*$", body, re.I | re.M)
-                    return re.sub(r"[{}]", "", m.group(1)) if m else ""
-                out.append({"citekey": key, "title": f("title"), "authors": f("author")[:60], "year": f("year") or f("date")[:4], "doi": f("doi")})
+    for e in bibliography.load_all(Path("literature")):
+        if all(w in e["text"].lower() for w in words):
+            out.append({
+                "citekey": None if e["derived"] else e["key"],
+                "title": re.sub(r"[{}]", "", e["title"]),
+                "authors": ", ".join(e["authors"][:3]) + (" et al." if len(e["authors"]) > 3 else ""),
+                "year": e["year"], "doi": e["doi"], "file": e["file"],
+            })
     return out[:limit]
 
 
@@ -70,7 +76,7 @@ def main() -> None:
     source = "Zotero (local API)"
     if hits is None:
         hits = from_bib(args.query, args.limit)
-        source = "literature/*.bib (Zotero not reachable)"
+        source = "literature/ (Zotero not reachable)"
     print(f"# {len(hits)} hit(s) from {source}")
     for h in hits:
         print(f"- [{h.get('citekey') or 'no citekey'}] {h['authors']} ({h['year']}). {h['title']}" + (f". doi:{h['doi']}" if h.get("doi") else ""))

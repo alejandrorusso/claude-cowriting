@@ -11,6 +11,13 @@
 
 - New `/cw:submit [target]`: the Integrity Guardian's check, the consistency report, open markers, the references against Crossref, the AI log's open turns and whether the disclosure is current, as one checklist with locations and the author's next step per item. It logs under the category `integrity`. Readiness is not judged; the findings are for the author.
 
+### Bibliographies from any reference manager
+
+- `literature/` is read in four formats: BibTeX/BibLaTeX (`.bib`), CSL JSON (`.json`), RIS (`.ris`) and PubMed's MEDLINE export (`.nbib`), so Mendeley, EndNote, Citavi, Paperpile, JabRef, Web of Science, Scopus and PubMed exports work beside the Zotero auto-export. One reader (`tools/bibliography.py`) serves `verify_refs.py` and the Zotero tool's fallback search.
+- `verify_refs.py` without arguments checks every bibliography file under `literature/` and reports them file by file; `.verify.json` lists the files. An entry without a DOI is looked up on Crossref by title, first author and year; a DOI Crossref lists for a title like it is shown as `NO DOI … Crossref lists doi:…: check that it is this work`, counted as `suggested`, never as verified. `--no-lookup` skips that.
+- RIS and PubMed records carry no citekeys; the tools derive one (`garcia2022`, `pmid:12345`), show it in parentheses, and the consistency check says it cannot match citations against those files.
+- Fixed: `verify_refs.py` wrote its summary into `literature/`, the author's folder. In a workspace with the 0.2.0 settings the sandbox refused that write and the run ended in a traceback instead of the summary line; without the sandbox the guard logged the file as a detected change on every run. The summary now goes to `.cowriting/verify.json`; the pane reads it there and still finds an older one in `literature/`.
+
 ### Word and LibreOffice manuscripts
 
 - A `.docx` or `.odt` in `manuscript/` is read as text through pandoc: the Read tool answers with the converted text (line ranges work), the word count and the live review use the same conversion, and the guard treats the file like any other. `Grep` cannot search inside such a file, and located feedback names the line of the converted text. Without pandoc the file stays unreadable, and the Read tool answers as before.

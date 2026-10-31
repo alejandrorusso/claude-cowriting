@@ -19,7 +19,7 @@ CoWriting turns these rules into features:
 | Transparency | Every prompt and answer is logged automatically to `ai-log/` (append-only, timestamped, with the model and plugin versions). |
 | Disclosure | `/cw:disclosure` turns the log into an **AI register** (EN/DE, Markdown/LaTeX) for your declaration of authorship or your journal, and into a prompts appendix where one is required. |
 | Responsibility | You classify each AI input: **✓ used** (adopted), **✎ changed** (adapted), **✗ not used** (rejected) or **ℹ info**. The card shows who said it, what you asked and what it said. Claude never decides this for you. |
-| No fabricated sources | References need a verified DOI or a citekey from your Zotero export. `verify_refs.py` checks your `.bib` against Crossref. |
+| No fabricated sources | References need a verified DOI or a citekey from your reference manager's export. `verify_refs.py` checks your bibliography (`.bib`, CSL JSON, RIS, PubMed) against Crossref. |
 
 The background research and requirements are in [docs/research-and-requirements.md](docs/research-and-requirements.md). How each feature maps to the DFG principles is in [docs/gwp-rationale.md](docs/gwp-rationale.md).
 
@@ -64,7 +64,7 @@ You get:
 
 ```
 manuscript/            ← you write here (main.tex or main.md); Claude can only read it
-literature/references.bib  ← Zotero auto-export
+literature/references.bib  ← your reference manager's export (.bib, CSL JSON, RIS or PubMed .nbib)
 literature/style-models/   ← papers whose style you like (for the Style Coach)
 party.md               ← your briefing: what each persona should look for in this project
 party/                 ← your own experts, one <id>.md each (the catalogue members are listed in paper.json)
@@ -80,12 +80,29 @@ CoWriting commits your manuscript and the AI log for you after each change (once
 
 **Updated the plugin?** A workspace keeps the rule files it was set up with (`CLAUDE.md`, `.claude/settings.json`), and they are yours, so the plugin never changes them on its own. `/cw:paper upgrade` lists what your workspace lacks against the current templates: deny rules and sandbox paths, the current `CLAUDE.md`, the party roster in `paper.json`, missing template files. `/cw:paper upgrade apply` adds them. Settings are merged, so your own rules stay; a replaced `CLAUDE.md` is kept under `.cowriting/upgrade/<time>/`, so you can carry your edits over. `party.md`, `scope.md` and your manuscript are never touched.
 
-### Zotero
+### Reference managers
+
+Put your manager's export into `literature/`. Every file there is read, in these formats:
+
+| Format | File | Comes from |
+|---|---|---|
+| BibTeX / BibLaTeX | `.bib` | Zotero (Better BibTeX), JabRef, Mendeley, Citavi, Paperpile, EndNote |
+| CSL JSON | `.json` | Zotero, Mendeley, Paperpile; pandoc reads it directly |
+| RIS | `.ris` | EndNote, Citavi, Mendeley, Web of Science, Scopus, most journal sites |
+| MEDLINE | `.nbib` | PubMed (*Save → PubMed*) |
+
+The Librarian searches all of them, `verify_refs.py` checks every DOI in them against Crossref and, for an entry without a DOI, asks Crossref by title and shows the DOI it lists for you to check. Citekeys for `\cite{…}` and `[@…]` come from `.bib` files and the `id` of CSL JSON; RIS and PubMed files carry none, so the consistency check cannot match citations against them. Only Zotero has a live connection: the local API lets The Librarian search your whole library, not just the export.
+
+**Zotero**
 
 1. Install [Better BibTeX](https://retorque.re/zotero-better-bibtex/).
 2. Right-click your paper's collection, choose **Export Collection…**, pick **Better BibLaTeX**, and tick ☑ **Keep updated**. Save it as `literature/references.bib`.
 3. Optional: in Zotero 7, go to *Settings → Advanced* and enable **Allow other applications on this computer to communicate with Zotero**. *The Librarian* can then search your whole library.
 4. VS Code: the recommended *Citation Picker for Zotero* inserts citekeys while you write.
+
+**Mendeley, EndNote, Citavi, Paperpile, JabRef:** export your collection as BibTeX (or CSL JSON, or RIS) into `literature/` and export again when the library changes. There is no live search of these libraries.
+
+**PubMed:** search results saved as *PubMed* format land in `literature/<name>.nbib`; the DOI check and the library search read them, and the entries are shown as `pmid:<n>`.
 
 ### Obsidian
 
