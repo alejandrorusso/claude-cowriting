@@ -244,7 +244,7 @@ The game rewards **your own writing and your transparency, never AI use**:
 
 ## Privacy
 
-Everything stays in your workspace: logs, notes, game state. CoWriting sends nothing anywhere. What Claude sees is governed by your Claude Code account and settings, as usual.
+Everything stays in your workspace: logs, notes, game state. CoWriting contacts the network only when you ask it to check sources: Crossref for DOIs and titles, your Zotero on `localhost`, and the web through Claude Code's own search tools when a persona looks for literature. Nothing else is sent anywhere. What Claude sees is governed by your Claude Code account and settings, as usual.
 
 Do not put confidential review material or unpublished third-party data into prompts. Autosave commits `ai-log/`, which makes your process verifiable. The log holds your prompts, so before you push the repository anywhere public, check that you're happy to publish them, or switch autosave off.
 
