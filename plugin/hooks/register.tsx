@@ -1,65 +1,1556 @@
+// CoWriting's hooks module. Everything that takes $ (the mods API) is declared in this one file,
+// because the plugin directory reads a mod's calls only through functions declared beside its hooks.
+// Pure logic stays in core.ts, personas.ts and sprites.ts.
+
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
+import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, Usage, WatchState } from '../types'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, computeStats, countWords, cut, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, limitCrossed, localTime, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, READ_ONLY_TOOLS, setBrief, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import type { FileChange, Fingerprint, Paragraph } from './core'
+import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
+import type { CustomPersona, Persona } from './personas'
+import { rasterCells, svgSource } from './sprites'
 
-import type { FocusMode, Paper, Review, Snapshot, Tab, Usage } from '../types'
-import {
-  AI_TEXT_MARKER,
-  EMPTY_STATS,
-  EMPTY_USAGE,
-  limitCrossed,
-  toUsage,
-  usageParts,
-  usageShort,
-  GUARD_MESSAGE,
-  READ_ONLY_TOOLS,
-  absolutePath,
-  advanceGame,
-  authorFileOf,
-  authorGuardMessage,
-  bashTouchesManuscript,
-  bashWritesTo,
-  briefFor,
-  categoryFor,
-  changedFiles,
-  computeStats,
-  guardInputOf,
-  handBackAgentId,
-  WATCH_DEFAULT,
-  isManuscriptPath,
-  newId,
-  overrelianceNudge,
-  personaForAgent,
-} from './core'
-import { PERSONAS, customPersonas, isCustomId, partyPersonas, personaById, personaFileSkeleton } from './personas'
-import { drawBand, drawLiveBand, drawPane, drawReviewRow, drawToolLine, drawWaiting } from './ui'
-import { AUTOSAVE_TICK_MS, autosaveTick } from './autosave'
-import { SCOPE_FILE, checkPoints, measureScope } from './scope'
-import { IDLE_WATCH, PAUSE_MS, TICK_MS, resetWatchBaseline, watchTick } from './watch'
-import {
-  CONVERTED_FILE,
-  appendLog,
-  authorNames,
-  describePapers,
-  findPaper,
-  fingerprintAuthorFiles,
-  loadParty,
-  manuscriptWords,
-  readGame,
-  readLog,
-  readBriefs,
-  readText,
-  readToolCounts,
-  openPaper,
-  setLogVersions,
-  targetFolder,
-  upgradePaper,
-  withLog,
-  writeBrief,
-  writeGame,
-  writeParty,
-} from './workspace'
+// ===== workspace =====
+// (was hooks/workspace.ts: the directory reads $ only into functions declared in this file)
+
+// Reading and writing the paper workspace through `$.fs`. A workspace is a
+// folder holding paper.json, or a folder whose .active-project names one of
+// its projects/<name>/ papers. /cowrite:paper <path> can also point the session at
+// a paper folder anywhere, so Claude Code can run from any folder.
+
+
 
 type Engine = EngineInterface
+
+const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
+
+async function readJson<T>($: Engine, path: string): Promise<T | undefined> {
+  try {
+    if (!(await $.fs.exists(path))) return undefined
+    return JSON.parse(await $.fs.read(path)) as T
+  } catch {
+    return undefined
+  }
+}
+
+type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave'>> & { domainPack?: string }
+
+/** The catalogue members of a paper's party: its roster, or for a paper.json from before rosters, the old domain pack's. */
+export const catalogParty = (json: PaperJson): string[] => {
+  if (Array.isArray(json.party)) return json.party.filter(id => PERSONAS.some(p => p.id === id))
+  return json.domainPack === 'medicine' ? PERSONAS.map(p => p.id) : [...DEFAULT_PARTY]
+}
+
+const asPaper = (root: string, json: PaperJson): Paper => ({
+  root,
+  name: json.name ?? root.split('/').pop() ?? 'paper',
+  format: json.format === 'latex' ? 'latex' : 'markdown',
+  language: json.language === 'de' ? 'de' : 'en',
+  party: [...catalogParty(json), ...customPersonas().filter(p => loadedRoot === root).map(p => p.id)],
+  autosave: json.autosave !== false,
+})
+
+/** A paper folder chosen with /cowrite:paper <path>; null: the session's folder decides. */
+const paperRootAtom = atom({ plugin: 'cowrite', key: 'paperRoot' } as const, null as string | null)
+
+const RECENT_KEY = 'recentPapers'
+const KEEP_RECENT = 8
+
+/** The paper the session works on, or null outside a CoWriting workspace. */
+export async function findPaper($: Engine): Promise<Paper | null> {
+  const chosen = await read($, paperRootAtom)
+  if (chosen !== null) {
+    const json = await readJson<PaperJson>($, join(chosen, 'paper.json'))
+    if (json !== undefined) return asPaper(chosen, json)
+  }
+  const cwd = await $.session.cwd()
+  const here = await readJson<PaperJson>($, join(cwd, 'paper.json'))
+  if (here !== undefined) return asPaper(cwd, here)
+
+  const marker = join(cwd, '.active-project')
+  if (await $.fs.exists(marker)) {
+    const name = (await $.fs.read(marker)).trim()
+    const root = join(cwd, 'projects', name)
+    const json = await readJson<PaperJson>($, join(root, 'paper.json'))
+    if (json !== undefined) return asPaper(root, json)
+  }
+  return null
+}
+
+// ---------------------------------------------------------------- the party
+
+/** The author's own experts: party/<id>.md files in the paper folder. */
+export const PARTY_DIR = 'party'
+
+// the paper whose experts personas.ts holds, and the prompt each one was registered with
+let loadedRoot: string | null = null
+const registered = new Map<string, string>()
+
+/** The party/<id>.md files of a paper as personas, with the ids of files that are not one. */
+export async function readCustomPersonas($: Engine, root: string): Promise<{ experts: CustomPersona[]; broken: string[] }> {
+  const dir = join(root, PARTY_DIR)
+  const experts: CustomPersona[] = []
+  const broken: string[] = []
+  if (!(await $.fs.exists(dir))) return { experts, broken }
+  const files = (await $.fs.list(dir)).filter(f => f.kind === 'file' && f.name.endsWith('.md')).map(f => f.name).sort()
+  for (const name of files) {
+    const id = name.slice(0, -3)
+    const parsed = parsePersonaFile(id, await $.fs.read(join(dir, name)).catch(() => ''))
+    if (parsed === null) broken.push(id)
+    else experts.push(parsed)
+  }
+  return { experts, broken }
+}
+
+/**
+ * Reads the paper's experts, makes them known to the pane and the commands, and registers each as a
+ * cowrite:<id> agent type the model can dispatch from the next turn on; one already registered with the
+ * same prompt is left alone. Returns the ids of files that are not a persona.
+ */
+export async function loadParty($: Engine, root: string): Promise<string[]> {
+  const { experts, broken } = await readCustomPersonas($, root)
+  if (loadedRoot !== root) registered.clear()
+  loadedRoot = root
+  setCustomPersonas(experts.map(x => x.persona))
+  for (const { persona, prompt } of experts) {
+    if (registered.get(persona.id) === prompt) continue
+    const name = persona.id
+    const description = customDescription(persona)
+    try {
+      // written out member by member: the directory reads the registration as it stands here
+      await $.agent.register({ name: name, description: description, prompt: prompt, tools: CUSTOM_TOOLS })
+      registered.set(persona.id, prompt)
+    } catch {
+      // not bound yet, or the spec refused: the next load tries again
+    }
+  }
+  for (const id of [...registered.keys()]) if (!experts.some(x => x.persona.id === id)) registered.delete(id)
+  return broken
+}
+
+/** Writes the roster of catalogue members into paper.json, keeping everything else in it. */
+export async function writeParty($: Engine, root: string, ids: readonly string[]): Promise<void> {
+  const path = join(root, 'paper.json')
+  const json = (await readJson<PaperJson & Record<string, unknown>>($, path)) ?? {}
+  const { domainPack: _pack, ...rest } = json
+  await $.fs.write(path, `${JSON.stringify({ ...rest, party: ids }, null, 2)}\n`)
+}
+
+export async function readLog($: Engine, root: string): Promise<LogEntry[]> {
+  const dir = join(root, 'ai-log')
+  if (!(await $.fs.exists(dir))) return []
+  const files = (await $.fs.list(dir))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.jsonl'))
+    .map(f => f.name)
+    .sort()
+  const entries: LogEntry[] = []
+  for (const name of files) entries.push(...parseLog(await $.fs.read(join(dir, name))))
+  return entries
+}
+
+// The versions every response entry names, set once the session knows them.
+let versions: { plugin?: string; claude_code?: string } = {}
+export const setLogVersions = (v: { plugin?: string; claude_code?: string }) => {
+  versions = { ...v }
+}
+
+// One writer at a time per paper: the log is appended by reading and rewriting the month's
+// file (the engine's fs has no append), so two appends in flight would lose one.
+const queues = new Map<string, Promise<unknown>>()
+
+/** Runs `fn` after every earlier log write of this paper has finished, before any later one. */
+export function withLog<T>(root: string, fn: () => Promise<T>): Promise<T> {
+  const previous = queues.get(root) ?? Promise.resolve()
+  const run = previous.then(fn, fn)
+  queues.set(root, run.catch(() => undefined))
+  return run
+}
+
+/** Append one entry to this month's log file (append-only by content). */
+export function appendLog($: Engine, root: string, entry: LogEntry): Promise<void> {
+  const stamped = entry.type === 'response' ? { ...entry, ...versions } : entry
+  return withLog(root, async () => {
+    const path = join(root, 'ai-log', monthFile(new Date()))
+    const before = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
+    const sep = before === '' || before.endsWith('\n') ? '' : '\n'
+    await $.fs.write(path, `${before}${sep}${JSON.stringify(stamped)}\n`)
+  })
+}
+
+/** The files of a manuscript the party reads: text formats, and office files pandoc turns into text. */
+export const MANUSCRIPT_FILE = /\.(tex|md|markdown|qmd|rmd|docx|odt)$/i
+
+/** A Word or LibreOffice file: read through pandoc, never as bytes. */
+export const CONVERTED_FILE = /\.(docx|odt)$/i
+
+/**
+ * A manuscript file as text: the file itself, or for a Word/LibreOffice file what
+ * pandoc makes of it (Markdown, lines unwrapped). Rejects when pandoc is missing or fails.
+ */
+export async function readText($: Engine, path: string): Promise<string> {
+  if (!CONVERTED_FILE.test(path)) return $.fs.read(path)
+  const run = await $.process.run(['pandoc', path, '--to', 'markdown', '--wrap=none'], { timeoutMs: 60_000 })
+  if (run.exitCode !== 0) throw new Error(`pandoc could not read ${path}: ${run.stderr.trim() || `exit ${run.exitCode}`}`)
+  return run.stdout
+}
+
+/**
+ * /cowrite:paper upgrade [apply]: what a workspace from an earlier plugin version lacks,
+ * listed by the scaffold tool; with apply, made. Runs on the host, not as a tool call,
+ * so the guard neither refuses it (the author asked) nor records it as a detected change.
+ */
+export async function upgradePaper($: Engine, root: string, isApply: boolean): Promise<string> {
+  const tool = join($.plugin.root, 'tools', 'new_paper.py')
+  const run = await $.process.run(['python3', '-I', tool, '--upgrade', ...(isApply ? ['--apply'] : []), '--dir', root], { cwd: root, timeoutMs: 60_000 })
+  if (run.exitCode !== 0) return `Upgrade failed:\n${(run.stderr || run.stdout).trim()}`
+  const report = run.stdout.trim()
+  if (isApply || report.endsWith('nothing to do.')) return report
+  return `${report}\nApply with /cowrite:paper upgrade apply. Your CLAUDE.md is kept under .cowriting/upgrade/ if it is replaced.`
+}
+
+/** Folders never compared: git's own, and dependencies a build may pull in. */
+const SKIPPED_FOLDERS = new Set(['.git', 'node_modules'])
+
+/** Every file of the author's under the paper, a few levels deep: Claude's places are left out. */
+export async function listAuthorFiles($: Engine, root: string, dir = root, depth = 0): Promise<string[]> {
+  if (depth > 4 || !(await $.fs.exists(dir))) return []
+  const out: string[] = []
+  for (const entry of await $.fs.list(dir)) {
+    const path = join(dir, entry.name)
+    if (entry.kind === 'dir') {
+      if (SKIPPED_FOLDERS.has(entry.name) || authorFileOf(join(path, 'x'), root) === null) continue
+      out.push(...(await listAuthorFiles($, root, path, depth + 1)))
+    } else if (entry.kind === 'file' && authorFileOf(path, root) !== null) out.push(path)
+  }
+  return out
+}
+
+/** The author's files as they are now: relative path → `mtime:size`. */
+export async function fingerprintAuthorFiles($: Engine, paper: Paper): Promise<Fingerprint> {
+  const out: Record<string, string> = {}
+  for (const path of await listAuthorFiles($, paper.root)) {
+    const stat = await $.fs.stat(path).catch(() => null)
+    if (stat !== null) out[path.slice(paper.root.length + 1)] = `${stat.mtimeMs}:${stat.size}`
+  }
+  return out
+}
+
+/** The names at the paper's root that are wholly the author's: what a shell command may not write to. */
+export async function authorNames($: Engine, root: string): Promise<string[]> {
+  const entries = await $.fs.list(root).catch(() => [])
+  return entries.map(x => x.name).filter(name => !SKIPPED_FOLDERS.has(name) && isAuthorsName(name))
+}
+
+async function wordsUnder($: Engine, dir: string, depth: number): Promise<number> {
+  if (depth > 4 || !(await $.fs.exists(dir))) return 0
+  let total = 0
+  for (const entry of await $.fs.list(dir)) {
+    const path = join(dir, entry.name)
+    if (entry.kind === 'dir') total += await wordsUnder($, path, depth + 1)
+    else if (entry.kind === 'file' && MANUSCRIPT_FILE.test(entry.name)) {
+      const format = entry.name.toLowerCase().endsWith('.tex') ? 'latex' : 'markdown'
+      total += countWords(await readText($, path).catch(() => ''), format)
+    }
+  }
+  return total
+}
+
+export async function manuscriptWords($: Engine, paper: Paper): Promise<number> {
+  return wordsUnder($, join(paper.root, 'manuscript'), 0)
+}
+
+const gamePath = (root: string) => join(root, '.cowriting', 'game.json')
+
+export async function readGame($: Engine, root: string): Promise<GameFile> {
+  const game = await readJson<GameFile>($, gamePath(root))
+  return game?.version === 1 ? { ...NEW_GAME, ...game } : NEW_GAME
+}
+
+export async function writeGame($: Engine, root: string, game: GameFile): Promise<void> {
+  await $.fs.write(gamePath(root), `${JSON.stringify(game, null, 2)}\n`)
+}
+
+/** Counts the tools write: verified references and generated disclosures. */
+export async function readToolCounts($: Engine, root: string) {
+  // 0.2.0 writes the summary in Claude's place; a run before that left it in literature/
+  const verify =
+    (await readJson<{ ok?: number }>($, join(root, '.cowriting', 'verify.json'))) ??
+    (await readJson<{ ok?: number }>($, join(root, 'literature', '.verify.json')))
+  const disclosureDir = join(root, 'disclosure')
+  const disclosures = (await $.fs.exists(disclosureDir))
+    ? (await $.fs.list(disclosureDir)).filter(f => f.name.startsWith('ai-register')).length
+    : 0
+  return { verifiedRefs: verify?.ok ?? 0, disclosures }
+}
+
+export async function setActiveProject($: Engine, name: string): Promise<string> {
+  const cwd = await $.session.cwd()
+  const root = join(cwd, 'projects', name)
+  if (!(await $.fs.exists(join(root, 'paper.json')))) {
+    return `No paper "${name}" under projects/. Create one with /cowrite:init.`
+  }
+  await $.fs.write(join(cwd, '.active-project'), `${name}\n`)
+  await update($, paperRootAtom, () => null)
+  return `Active paper: ${name}`
+}
+
+/** Papers opened by path before, newest first (kept across sessions). */
+export async function recentPapers($: Engine): Promise<string[]> {
+  const value = await $.store.get(RECENT_KEY).catch(() => undefined)
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+/** `~/x`, `x` (relative to the session's folder) or `/x`, without a trailing slash. */
+async function resolvePath($: Engine, arg: string): Promise<string> {
+  const raw = arg.trim().replace(/^(['"])(.*)\1$/, '$2')
+  if (raw === '~' || raw.startsWith('~/')) return join((await $.env.get('HOME')) ?? '', raw.slice(1)).replace(/(.)\/$/, '$1')
+  const path = raw.startsWith('/') ? raw : join(await $.session.cwd(), raw)
+  return path.replace(/(.)\/$/, '$1')
+}
+
+async function kindOf($: Engine, path: string): Promise<'file' | 'dir' | 'other' | 'none'> {
+  return $.fs.stat(path).then(s => s.kind, () => 'none' as const)
+}
+
+/**
+ * /cowrite:paper <arg>: a number picks a recent paper, a bare name one under
+ * projects/, anything else is a path to a paper folder (or a file in it).
+ */
+export async function openPaper($: Engine, arg: string): Promise<string> {
+  const recent = await recentPapers($)
+  if (/^\d+$/.test(arg)) {
+    const pick = recent[Number(arg) - 1]
+    if (pick === undefined) return `No recent paper #${arg}. /cowrite:paper lists them.`
+    arg = pick
+  }
+  const isName = !/[\/~]/.test(arg) && arg !== '.' && arg !== '..'
+  if (isName && (await $.fs.exists(join(await $.session.cwd(), 'projects', arg, 'paper.json')))) {
+    return setActiveProject($, arg)
+  }
+  let root = await resolvePath($, arg)
+  const kind = await kindOf($, root)
+  if (kind === 'none' || kind === 'other') return `No folder ${root}.`
+  if (kind === 'file') root = root.replace(/\/[^/]+$/, '') || '/'
+  const json = await readJson<PaperJson>($, join(root, 'paper.json'))
+  if (json === undefined) {
+    return `${root} is not a CoWriting paper yet. Set it up there with /cowrite:init ${root}`
+  }
+  await update($, paperRootAtom, () => root)
+  await $.store.set(RECENT_KEY, [root, ...recent.filter(r => r !== root)].slice(0, KEEP_RECENT)).catch(() => undefined)
+  return `Active paper: ${json.name ?? root.split('/').pop()} · ${root}`
+}
+
+/**
+ * /cowrite:init <path>: the session works on that folder from now on, so the
+ * workspace the skill scaffolds there is the active paper once it exists.
+ */
+export async function targetFolder($: Engine, arg: string): Promise<string | null> {
+  const root = await resolvePath($, arg)
+  if ((await kindOf($, root)) !== 'dir') return null
+  await update($, paperRootAtom, () => root)
+  const recent = await recentPapers($)
+  await $.store.set(RECENT_KEY, [root, ...recent.filter(r => r !== root)].slice(0, KEEP_RECENT)).catch(() => undefined)
+  return root
+}
+
+/** /cowrite:paper without arguments: the active paper and the recent ones. */
+export async function describePapers($: Engine): Promise<string> {
+  const paper = await findPaper($)
+  const recent = await recentPapers($)
+  const lines = [paper === null ? 'No active paper.' : `Active paper: ${paper.name} · ${paper.root}`]
+  if (recent.length > 0) lines.push('Recent:', ...recent.map((r, i) => `  ${i + 1}  ${r}`))
+  lines.push('Switch with /cowrite:paper <path | number | project name>.')
+  return lines.join('\n')
+}
+
+export async function readBriefs($: Engine, root: string): Promise<Record<string, string>> {
+  const path = join(root, BRIEF_FILE)
+  if (!(await $.fs.exists(path))) return {}
+  return parseBriefs(await $.fs.read(path))
+}
+
+/** Sets one section of party.md, creating the file when the paper has none. */
+export async function writeBrief($: Engine, root: string, key: string, body: string): Promise<void> {
+  const path = join(root, BRIEF_FILE)
+  const before = (await $.fs.exists(path)) ? await $.fs.read(path) : '# Briefing for the review party\n'
+  await $.fs.write(path, setBrief(before, key, body))
+}
+
+// ===== autosave =====
+// (was hooks/autosave.ts: the directory reads $ only into functions declared in this file)
+
+// Autosave: the author's manuscript and the AI log are committed to git after
+// each change, once the files have been quiet for a short pause, so the
+// history shows how the text grew next to the AI input that came before it.
+// Only manuscript/ and ai-log/ are committed, under the author's own git
+// identity and unchanged; whatever else is staged stays as it is.
+
+
+
+
+export const AUTOSAVE_TICK_MS = 15_000
+/** How long the manuscript must stay unchanged before it is committed. */
+export const AUTOSAVE_PAUSE_MS = 30_000
+
+/** What autosave commits: the author's text and the record of AI input. */
+const SAVED = ['manuscript', 'ai-log'] as const
+const AUTOSAVE_TEXT_FILE = /\.(md|markdown|tex|txt)$/
+
+// A tick is not re-entered, and a failure is reported once per kind.
+let isBusy = false
+let reported = ''
+
+function git($: Engine, paper: Paper, args: readonly string[]) {
+  return $.process.run(['git', ...args], { cwd: paper.root })
+}
+
+function reportOnce($: Engine, kind: string, text: string): void {
+  if (reported === kind) return
+  reported = kind
+  $.ui.toast(text)
+}
+
+async function newLogEntries($: Engine, paper: Paper, top: string, path: string): Promise<number> {
+  const shown = await git($, paper, ['show', `HEAD:${path}`])
+  const lines = (text: string) => text.split('\n').filter(l => l.trim() !== '').length
+  const before = shown.exitCode === 0 ? lines(shown.stdout) : 0
+  return (await $.fs.read(`${top}/${path}`).then(lines, () => 0)) - before
+}
+
+async function wordsAt($: Engine, paper: Paper, top: string, path: string): Promise<FileChange> {
+  const shown = await git($, paper, ['show', `HEAD:${path}`])
+  const before = shown.exitCode === 0 ? countWords(shown.stdout, paper.format) : 0
+  const after = await $.fs.read(`${top}/${path}`).then(text => countWords(text, paper.format), () => 0)
+  return { file: path, before, after }
+}
+
+/** One look at the manuscript and the AI log; resolves the commit's title when it committed. */
+export async function autosaveTick($: Engine): Promise<string | null> {
+  if (isBusy) return null
+  isBusy = true
+  try {
+    const paper = await findPaper($)
+    if (paper === null || !paper.autosave) return null
+    // folder by folder: a folder git cannot see (missing, or empty) would fail the commit
+    const changed: string[] = []
+    const paths: string[] = []
+    for (const folder of SAVED) {
+      const status = await git($, paper, ['status', '--porcelain', '-z', '-uall', '--', folder])
+      if (status.exitCode !== 0) {
+        reportOnce($, 'no-repo', 'CoWriting autosave: the paper folder is not a git repository (run git init there).')
+        return null
+      }
+      const found = changedPaths(status.stdout)
+      if (found.length > 0) changed.push(folder)
+      paths.push(...found)
+    }
+    if (paths.length === 0) return null
+
+    const top = (await git($, paper, ['rev-parse', '--show-toplevel'])).stdout.trim()
+    const now = await $.clock.now()
+    for (const path of paths) {
+      const mtime = await $.fs.stat(`${top}/${path}`).then(s => s.mtimeMs, () => 0)
+      if (now - mtime < AUTOSAVE_PAUSE_MS) return null // still writing
+    }
+
+    const isLog = (path: string) => /(^|\/)ai-log\//.test(path)
+    const written = paths.filter(p => !isLog(p))
+    const logged = paths.filter(isLog)
+    const changes: FileChange[] = []
+    for (const path of written) {
+      changes.push(AUTOSAVE_TEXT_FILE.test(path) ? await wordsAt($, paper, top, path) : { file: path, before: 0, after: 0 })
+    }
+    let entries: number | null = null
+    for (const path of logged) entries = (entries ?? 0) + Math.max(0, await newLogEntries($, paper, top, path))
+    const message = autosaveMessage(changes, entries)
+
+    await git($, paper, ['add', '-A', '--', ...changed])
+    const commit = await git($, paper, ['commit', '--quiet', '-m', message, '--', ...changed])
+    if (commit.exitCode !== 0) {
+      const isIdentity = /tell me who you are|user\.email|user\.name/i.test(commit.stderr)
+      reportOnce(
+        $,
+        isIdentity ? 'identity' : 'commit',
+        isIdentity
+          ? 'CoWriting autosave needs your git name: git config --global user.name "…" and user.email "…"'
+          : `CoWriting autosave could not commit: ${commit.stderr.trim().slice(0, 100)}`,
+      )
+      return null
+    }
+    reported = ''
+    return message.split('\n')[0]!
+  } finally {
+    isBusy = false
+  }
+}
+
+// ===== scope =====
+// (was hooks/scope.ts: the directory reads $ only into functions declared in this file)
+
+// The scope: what the author plans for the paper (scope.md, their words) and
+// how far the manuscript has come. Words, figures, tables, references and
+// open markers are counted without AI; whether the planned points are made is
+// judged by a small model on request (/cowrite:scope check), logged like any AI input.
+
+
+
+
+export const SCOPE_FILE = 'scope.md'
+const CHECK_FILE = '.cowriting/scope-check.json'
+/** Words on a page when the author gives pages, not words. */
+export const WORDS_PER_PAGE = 300
+
+// ------------------------------------------------------------ the plan
+
+export type ScopePlan = {
+  goal: string
+  words?: number
+  figures?: number
+  tables?: number
+  references?: number
+  deadline?: string
+  sections: { name: string; target?: number; stage?: Stage }[]
+  points: { text: string; section?: string; isTicked: boolean }[]
+}
+
+const STAGES: Record<string, Stage> = {
+  outline: 'outline', gliederung: 'outline', skizze: 'outline',
+  draft: 'draft', entwurf: 'draft', rohfassung: 'draft',
+  revised: 'revised', überarbeitet: 'revised', ueberarbeitet: 'revised',
+  final: 'final', fertig: 'final', done: 'final',
+}
+
+/** Target keys in English and German. */
+const TARGETS: Record<string, keyof ScopePlan | 'pages' | 'perPage'> = {
+  words: 'words', wörter: 'words', woerter: 'words',
+  pages: 'pages', seiten: 'pages',
+  'words per page': 'perPage', 'wörter pro seite': 'perPage',
+  figures: 'figures', abbildungen: 'figures',
+  tables: 'tables', tabellen: 'tables',
+  references: 'references', quellen: 'references', literatur: 'references',
+  deadline: 'deadline', abgabe: 'deadline', frist: 'deadline',
+}
+
+const number = (text: string): number | undefined => {
+  const match = /(\d[\d.,' ]*)/.exec(text)
+  if (match === null) return undefined
+  const n = Number(match[1]!.replace(/[.,' ](?=\d{3}\b)/g, '').replace(',', '.'))
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+const sectionKind = (heading: string): 'goal' | 'targets' | 'sections' | 'points' | undefined => {
+  const h = heading.toLowerCase()
+  if (/goal|ziel/.test(h)) return 'goal'
+  if (/target|umfang|vorgabe/.test(h)) return 'targets'
+  if (/section|kapitel|abschnitt|gliederung|outline/.test(h)) return 'sections'
+  if (/point|kernaussage|aussage|punkt/.test(h)) return 'points'
+  return undefined
+}
+
+/** scope.md as the author wrote it; comments and placeholders ignored. */
+export const parseScope = (text: string): ScopePlan => {
+  const plan: ScopePlan = { goal: '', sections: [], points: [] }
+  let pages: number | undefined
+  let perPage = WORDS_PER_PAGE
+  const parts = text.replace(/<!--[\s\S]*?-->/g, '').split(/^## +(.+)$/m)
+  for (let i = 1; i < parts.length; i += 2) {
+    const kind = sectionKind(parts[i]!)
+    const body = (parts[i + 1] ?? '').trim()
+    const items = body.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l)).map(l => l.replace(/^[-*+]\s+/, ''))
+    if (kind === 'goal') plan.goal = body
+    if (kind === 'targets') {
+      for (const item of items) {
+        const [rawKey = '', ...rest] = item.split(':')
+        const key = TARGETS[rawKey.trim().toLowerCase()]
+        const value = rest.join(':').trim()
+        if (key === undefined || value === '') continue
+        if (key === 'deadline') {
+          const date = /\d{4}-\d{2}-\d{2}/.exec(value)?.[0]
+          if (date !== undefined) plan.deadline = date
+        } else if (key === 'pages') pages = number(value)
+        else if (key === 'perPage') perPage = number(value) ?? perPage
+        else (plan as Record<string, unknown>)[key] = number(value)
+      }
+    }
+    if (kind === 'sections') {
+      for (const item of items) {
+        const [name = '', ...rest] = item.split(':')
+        const detail = rest.join(':').toLowerCase()
+        const stage = Object.entries(STAGES).find(([word]) => new RegExp(`(^|[^\\p{L}])${word}([^\\p{L}]|$)`, 'u').test(detail))?.[1]
+        if (name.trim() !== '') plan.sections.push({ name: name.trim(), target: number(detail), stage })
+      }
+    }
+    if (kind === 'points') {
+      for (const item of items) {
+        const tick = /^\[([ xX✓])\]\s*/.exec(item)
+        let text = tick ? item.slice(tick[0].length) : item
+        let section: string | undefined
+        const tail = /\s*\((?:→\s*|in\s+)?([^()]+)\)\s*$/.exec(text)
+        if (tail !== null && plan.sections.some(s => s.name.toLowerCase() === tail[1]!.trim().toLowerCase())) {
+          section = tail[1]!.trim()
+          text = text.slice(0, tail.index)
+        }
+        if (text.trim() !== '') plan.points.push({ text: text.trim(), section, isTicked: tick !== null && tick[1] !== ' ' })
+      }
+    }
+  }
+  if (plan.words === undefined && pages !== undefined) plan.words = Math.round(pages * perPage)
+  if (plan.words === undefined && plan.sections.some(s => s.target !== undefined)) {
+    plan.words = plan.sections.reduce((sum, s) => sum + (s.target ?? 0), 0)
+  }
+  return plan
+}
+
+export const isEmptyPlan = (plan: ScopePlan): boolean =>
+  plan.goal === '' && plan.points.length === 0 && plan.sections.length === 0 && plan.words === undefined
+
+// ------------------------------------------------------------ the text
+
+export type TextFile = { file: string; text: string; format: 'latex' | 'markdown' }
+
+const MARKERS = /\bTODO\b|\bFIXME\b|\bXXX\b|\\todo\b|\?\?|\[citation needed\]|\bUNVERIFIED\b/g
+const HEADING = { latex: /^\s*\\(?:chapter|section)\*?\{([^}]*)\}/, markdown: /^#{1,2}\s+(.+?)\s*#*$/ }
+
+type Chunk = { heading: string; text: string; format: 'latex' | 'markdown' }
+
+/** The text cut at its top headings (chapters and sections, # and ##). */
+const chunks = (files: readonly TextFile[]): Chunk[] => {
+  const out: Chunk[] = []
+  for (const f of files) {
+    let current: Chunk = { heading: '', text: '', format: f.format }
+    out.push(current)
+    for (const line of f.text.split('\n')) {
+      const heading = HEADING[f.format].exec(line)
+      if (heading !== null) {
+        current = { heading: heading[1]!.trim(), text: '', format: f.format }
+        out.push(current)
+      } else current.text += `${line}\n`
+    }
+  }
+  return out
+}
+
+const count = (text: string, re: RegExp) => (text.match(re) ?? []).length
+
+const citekeys = (files: readonly TextFile[]): Set<string> => {
+  const keys = new Set<string>()
+  for (const f of files) {
+    for (const m of f.text.matchAll(/\\[A-Za-z]*cite[a-z]*\*?(?:\[[^\]]*\]){0,2}\{([^}]*)\}/g)) {
+      for (const key of m[1]!.split(',')) if (key.trim() !== '') keys.add(key.trim())
+    }
+    if (f.format === 'markdown') for (const m of f.text.matchAll(/(?:^|[\s[;-])@([\w:.-]*\w)/g)) keys.add(m[1]!)
+  }
+  return keys
+}
+
+const matches = (heading: string, name: string) => {
+  const h = heading.toLowerCase()
+  const n = name.toLowerCase()
+  return h !== '' && (h === n || h.includes(n) || n.includes(h))
+}
+
+const STAGE_VALUE: Record<Stage, number> = { outline: 0, draft: 0.4, revised: 0.75, final: 1 }
+/** Each open marker in a section takes this much off its finish. */
+const MARKER_COST = 0.05
+
+const ratio = (c: Count) => (c.target === undefined ? undefined : Math.min(1, c.done / c.target))
+
+/** How far the text has come against the plan; points as the author ticked them or the last check found. */
+export const scopeProgress = (
+  plan: ScopePlan,
+  files: readonly TextFile[],
+  checked: Record<string, { status: PointStatus; where?: string; note?: string }>,
+  checkedAt: string | undefined,
+  today: string,
+): ScopeProgress => {
+  const parts = chunks(files)
+  const words = parts.reduce((sum, c) => sum + countWords(c.text, c.format), 0)
+  const allText = files.map(f => f.text).join('\n')
+  const sections: ScopeSection[] = plan.sections.map(s => {
+    const own = parts.filter(c => matches(c.heading, s.name))
+    return {
+      name: s.name,
+      target: s.target,
+      stage: s.stage,
+      words: own.reduce((sum, c) => sum + countWords(c.text, c.format), 0),
+      markers: own.reduce((sum, c) => sum + count(c.text, MARKERS), 0),
+      isFound: own.length > 0,
+    }
+  })
+  const points: ScopePoint[] = plan.points.map(p => ({ ...p, ...(checked[p.text] ?? {}) }))
+  const counts = {
+    words: { done: words, target: plan.words },
+    figures: { done: files.reduce((n, f) => n + count(f.text, f.format === 'latex' ? /\\begin\{figure\*?\}/g : /!\[[^\]]*\]\([^)]*\)/g), 0), target: plan.figures },
+    tables: {
+      done: files.reduce((n, f) => n + count(f.text, f.format === 'latex' ? /\\begin\{table\*?\}/g : /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/gm), 0),
+      target: plan.tables,
+    },
+    references: { done: citekeys(files).size, target: plan.references },
+  }
+
+  // content: the points count double, each quantity once (figures, tables, references half)
+  const weighted: [number | undefined, number][] = [
+    [points.length > 0 ? points.reduce((sum, p) => sum + (p.isTicked || p.status === 'covered' ? 1 : p.status === 'partial' ? 0.5 : 0), 0) / points.length : undefined, 2],
+    [ratio(counts.words), 1],
+    [ratio(counts.figures), 0.5],
+    [ratio(counts.tables), 0.5],
+    [ratio(counts.references), 0.5],
+  ]
+  const known = weighted.filter((p): p is [number, number] => p[0] !== undefined)
+  const content = known.length === 0 ? 0 : known.reduce((s, [v, w]) => s + v * w, 0) / known.reduce((s, [, w]) => s + w, 0)
+
+  // finish: the sections' stages, weighted by their targets, less the open markers
+  const staged = sections.filter(s => s.stage !== undefined)
+  const finish =
+    staged.length === 0
+      ? null
+      : staged.reduce((sum, s) => sum + Math.max(0, STAGE_VALUE[s.stage!] - s.markers * MARKER_COST) * (s.target ?? 1), 0) /
+        staged.reduce((sum, s) => sum + (s.target ?? 1), 0)
+
+  let daysLeft: number | undefined
+  let wordsPerDay: number | undefined
+  if (plan.deadline !== undefined) {
+    daysLeft = Math.ceil((Date.parse(plan.deadline) - Date.parse(today)) / 86_400_000)
+    if (plan.words !== undefined && daysLeft > 0) wordsPerDay = Math.max(0, Math.ceil((plan.words - words) / daysLeft))
+  }
+  return {
+    goal: plan.goal,
+    ...counts,
+    deadline: plan.deadline,
+    daysLeft,
+    wordsPerDay,
+    points,
+    checkedAt,
+    sections,
+    markers: count(allText, MARKERS),
+    content,
+    finish,
+    overall: finish === null ? content : 0.7 * content + 0.3 * finish,
+  }
+}
+
+// ------------------------------------------------------------ the check
+
+/** Manuscript lines with their numbers, file by file, cut at `maxChars`. */
+export const numberedText = (files: readonly TextFile[], maxChars = 80_000): string => {
+  let out = ''
+  for (const f of files) {
+    const block = `### ${f.file}\n${f.text.split('\n').map((l, i) => `${i + 1}: ${l}`).join('\n')}\n\n`
+    if (out.length + block.length > maxChars) return `${out}${block.slice(0, Math.max(0, maxChars - out.length))}\n[… cut]`
+    out += block
+  }
+  return out
+}
+
+export const scopeCheckSystem = (language: 'en' | 'de') =>
+  [
+    "You check which of an author's planned points their manuscript already makes. You never write, rephrase or suggest text:",
+    'the author is the sole author (DFG good scientific practice). You only assess.',
+    'For each numbered point answer: status "covered" (made and supported), "partial" (mentioned but not developed or not',
+    'supported) or "missing"; where = "file:line" of the best evidence (omit if missing); note = at most 15 words on what is',
+    'there or what is lacking, never wording for it.',
+    `Write the notes in ${language === 'de' ? 'German' : 'English'}.`,
+    'Answer with a JSON array only: [{"n": 1, "status": "partial", "where": "manuscript/main.tex:42", "note": "…"}].',
+  ].join(' ')
+
+export const parseCheck = (text: string, count: number): { n: number; status: PointStatus; where?: string; note?: string }[] => {
+  const json = /\[[\s\S]*\]/.exec(text)?.[0]
+  if (json === undefined) return []
+  try {
+    const items = JSON.parse(json) as unknown[]
+    return items.flatMap(item => {
+      const o = item as Record<string, unknown>
+      const n = Number(o.n)
+      const status = o.status
+      if (!Number.isInteger(n) || n < 1 || n > count) return []
+      if (status !== 'covered' && status !== 'partial' && status !== 'missing') return []
+      return [{
+        n,
+        status,
+        ...(typeof o.where === 'string' && o.where !== '' ? { where: o.where } : {}),
+        ...(typeof o.note === 'string' && o.note !== '' ? { note: o.note.slice(0, 160) } : {}),
+      }]
+    })
+  } catch {
+    return []
+  }
+}
+
+type CheckFile = { ts: string; model: string; points: Record<string, { status: PointStatus; where?: string; note?: string }> }
+
+
+export async function readCheck($: Engine, root: string): Promise<CheckFile | undefined> {
+  try {
+    const path = join(root, CHECK_FILE)
+    return (await $.fs.exists(path)) ? (JSON.parse(await $.fs.read(path)) as CheckFile) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const SCOPE_TEXT_FILE = /\.(tex|md|markdown|qmd|rmd)$/i
+
+export async function readTextFiles($: Engine, paper: Paper): Promise<TextFile[]> {
+  const out: TextFile[] = []
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 4 || !(await $.fs.exists(dir))) return
+    for (const entry of await $.fs.list(dir)) {
+      const path = join(dir, entry.name)
+      if (entry.kind === 'dir') await walk(path, depth + 1)
+      else if (entry.kind === 'file' && SCOPE_TEXT_FILE.test(entry.name)) {
+        out.push({ file: path.slice(paper.root.length + 1), text: await $.fs.read(path), format: entry.name.toLowerCase().endsWith('.tex') ? 'latex' : 'markdown' })
+      }
+    }
+  }
+  await walk(join(paper.root, 'manuscript'), 0)
+  return out.sort((a, b) => a.file.localeCompare(b.file))
+}
+
+export async function readPlan($: Engine, root: string): Promise<ScopePlan | null> {
+  const path = join(root, SCOPE_FILE)
+  if (!(await $.fs.exists(path))) return null
+  const plan = parseScope(await $.fs.read(path))
+  return isEmptyPlan(plan) ? null : plan
+}
+
+/** The scope's progress now, or null when the author has not set one. */
+export async function measureScope($: Engine, paper: Paper, today: string): Promise<ScopeProgress | null> {
+  const plan = await readPlan($, paper.root)
+  if (plan === null) return null
+  const check = await readCheck($, paper.root)
+  return scopeProgress(plan, await readTextFiles($, paper), check?.points ?? {}, check?.ts, today)
+}
+
+/** /cowrite:scope check: which points the text makes. Logged; resolves a one-line summary. */
+export async function checkPoints($: Engine, paper: Paper, model: string): Promise<string> {
+  const plan = await readPlan($, paper.root)
+  if (plan === null || plan.points.length === 0) return 'No points in scope.md yet: add them under "## Points", or run /cowrite:scope edit.'
+  const files = await readTextFiles($, paper)
+  if (files.every(f => f.text.trim() === '')) return 'The manuscript is still empty: nothing to check yet.'
+  const list = plan.points.map((p, i) => `${i + 1}. ${p.text}${p.section ? ` (planned for: ${p.section})` : ''}`).join('\n')
+  const prompt = `Planned points:\n${list}\n\nGoal of the paper: ${plan.goal || '(not given)'}\n\nManuscript:\n${numberedText(files)}`
+  const answer = await $.model.complete({
+    model,
+    system: scopeCheckSystem(paper.language),
+    prompt,
+    maxTokens: 1500,
+    effort: 'low',
+    timeoutMs: 120_000,
+  })
+  if (!answer.isAnswered) return 'The point check failed; try again later.'
+  const results = parseCheck(answer.text, plan.points.length)
+
+  const id = newId()
+  const ts = new Date(await $.clock.now()).toISOString()
+  await appendLog($, paper.root, {
+    type: 'prompt',
+    id,
+    ts,
+    session: await $.session.id(),
+    paper: paper.name,
+    category: 'structure',
+    origin: 'scope',
+    text: `Scope check: which of ${plan.points.length} planned points the manuscript makes`,
+  })
+  await appendLog($, paper.root, {
+    type: 'response',
+    ref: id,
+    ts,
+    model,
+    personas: [],
+    tools_used: [],
+    ai_text_flag: false,
+    answer: results.map(r => `${r.n}. ${r.status}${r.where ? ` @ ${r.where}` : ''}${r.note ? `: ${r.note}` : ''}`).join('\n') || '(no result)',
+  })
+
+  const points: CheckFile['points'] = {}
+  for (const r of results) points[plan.points[r.n - 1]!.text] = { status: r.status, where: r.where, note: r.note }
+  await $.fs.write(join(paper.root, CHECK_FILE), `${JSON.stringify({ ts, model, points } satisfies CheckFile, null, 2)}\n`)
+  const covered = results.filter(r => r.status === 'covered').length
+  const partial = results.filter(r => r.status === 'partial').length
+  return `🎯 Points: ${covered} covered, ${partial} partial, ${plan.points.length - covered - partial} missing · details in the Scope tab (/cowrite:pane scope)`
+}
+
+// ===== watch =====
+// (was hooks/watch.ts: the directory reads $ only into functions declared in this file)
+
+// Live review: while the author writes, a small model looks at the paragraphs
+// they just changed and the watching personas leave short hints. A review runs
+// once the author pauses, at most once a minute and 20 times an hour, and each
+// one is logged like any other AI input.
+
+
+
+
+export const TICK_MS = 5_000
+export const PAUSE_MS = 20_000
+const GAP_MS = 60_000
+const PER_HOUR = 20
+const KEEP_HINTS = 12
+
+export const IDLE_WATCH: WatchState = {
+  tokens: 0,
+  isOn: false,
+  personas: [],
+  hints: [],
+  status: 'off',
+  lastReviewAt: 0,
+  reviewTimes: [],
+  isHidden: false,
+}
+
+export const watchAtom = atom({ plugin: 'cowrite', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
+
+// What this module has seen of the manuscript; a reload starts a new baseline.
+const seen = {
+  texts: new Map<string, string>(),
+  mtimes: new Map<string, number>(),
+  dirty: new Set<string>(),
+  lastEditAt: 0,
+  isBusy: false,
+}
+
+export const resetWatchBaseline = () => {
+  seen.texts.clear()
+  seen.mtimes.clear()
+  seen.dirty.clear()
+  seen.lastEditAt = 0
+  seen.isBusy = false
+}
+
+
+async function manuscriptFiles($: Engine, dir: string, depth: number): Promise<string[]> {
+  if (depth > 4 || !(await $.fs.exists(dir))) return []
+  const out: string[] = []
+  for (const entry of await $.fs.list(dir)) {
+    const path = join(dir, entry.name)
+    if (entry.kind === 'dir') out.push(...(await manuscriptFiles($, path, depth + 1)))
+    else if (entry.kind === 'file' && MANUSCRIPT_FILE.test(entry.name)) out.push(path)
+  }
+  return out
+}
+
+async function setStatus($: Engine, status: string): Promise<void> {
+  await update($, watchAtom, s => ({ ...s, status }))
+}
+
+/** One look at the manuscript; resolves true when a review ran and was logged. */
+export async function watchTick($: Engine, model: string): Promise<boolean> {
+  const state = await read($, watchAtom)
+  if (!state.isOn || seen.isBusy) return false
+  const paper = await findPaper($)
+  if (paper === null) return false
+  const now = await $.clock.now()
+
+  for (const path of await manuscriptFiles($, join(paper.root, 'manuscript'), 0)) {
+    const { mtimeMs } = await $.fs.stat(path)
+    const known = seen.mtimes.get(path)
+    if (known === mtimeMs) continue
+    seen.mtimes.set(path, mtimeMs)
+    if (known === undefined || !seen.texts.has(path)) {
+      seen.texts.set(path, await readText($, path).catch(() => '')) // the baseline: what was there when watching began
+      continue
+    }
+    seen.dirty.add(path)
+    seen.lastEditAt = now
+  }
+
+  if (seen.dirty.size === 0) return false
+  if (now - seen.lastEditAt < PAUSE_MS) {
+    if (state.status !== 'you are writing…') await setStatus($, 'you are writing…')
+    return false
+  }
+  if (now - state.lastReviewAt < GAP_MS) return false
+  const recent = state.reviewTimes.filter(t => now - t < 3_600_000)
+  if (recent.length >= PER_HOUR) {
+    await setStatus($, `paused: ${PER_HOUR} reviews in the last hour`)
+    return false
+  }
+
+  seen.isBusy = true
+  try {
+    return await review($, paper, state, model, now, recent)
+  } finally {
+    seen.isBusy = false
+  }
+}
+
+async function review($: Engine, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
+  const parts: { file: string; changed: Paragraph[] }[] = []
+  for (const path of seen.dirty) {
+    const after = await readText($, path).catch(() => null)
+    if (after === null) continue // unreadable (pandoc missing, or a save half done): reviewed after the next save
+    const changed = changedParagraphs(seen.texts.get(path) ?? '', after, paper.format)
+    seen.texts.set(path, after)
+    if (changed.length > 0) parts.push({ file: path.slice(paper.root.length + 1), changed })
+  }
+  seen.dirty.clear()
+  if (parts.length === 0) return false
+
+  const active = partyPersonas(paper.party)
+  const personas = state.personas.flatMap(id => active.filter(p => p.id === id))
+  if (personas.length === 0) return false
+  const profilePath = join(paper.root, 'notes', 'ai', 'style-profile.md')
+  const profile = (await $.fs.exists(profilePath)) ? (await $.fs.read(profilePath)).slice(0, 2000) : ''
+
+  await update($, watchAtom, s => ({ ...s, status: 'reviewing…', lastReviewAt: now, reviewTimes: [...recent, now] }))
+  const answer = await $.model.complete({
+    model,
+    system: watchSystem(personas, paper.language, profile, await readBriefs($, paper.root).catch(() => ({}))),
+    prompt: watchExcerpt(parts),
+    maxTokens: 700,
+    effort: 'low',
+    timeoutMs: 60_000,
+  })
+  if (!answer.isAnswered) {
+    await setStatus($, 'the last live review failed; it will try again after your next change')
+    return false
+  }
+  const used = answer.usage
+  const spent = used.input_tokens + used.output_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens
+  await update($, watchAtom, s => ({ ...s, tokens: (s.tokens ?? 0) + spent }))
+  const hints = parseHints(answer.text, personas.map(p => p.id))
+
+  // Logged like every AI input: what was looked at, by whom, and what came back.
+  const id = newId()
+  const ts = new Date(now).toISOString()
+  const ranges = parts
+    .map(p => `${p.file} l.${p.changed[0]!.start}–${p.changed[p.changed.length - 1]!.end}`)
+    .join(', ')
+  await appendLog($, paper.root, {
+    type: 'prompt',
+    id,
+    ts,
+    session: await $.session.id(),
+    paper: paper.name,
+    category: personaById(hints[0]?.persona ?? '')?.category ?? 'feedback',
+    origin: 'watch',
+    text: `Live review (${personas.map(p => p.id).join(', ')}) of ${ranges}`,
+  })
+  await appendLog($, paper.root, {
+    type: 'response',
+    ref: id,
+    ts,
+    model,
+    personas: [...new Set(hints.map(h => h.persona))],
+    tools_used: [],
+    ai_text_flag: false,
+    answer: hints.length > 0 ? hints.map(h => `${h.persona} l.${h.line}: ${h.hint}`).join('\n') : '(no hints)',
+  })
+
+  const fileFor = (line: number) =>
+    parts.find(p => p.changed.some(c => line >= c.start && line <= c.end))?.file ?? parts[0]!.file
+  const fresh: LiveHint[] = hints.map(h => ({ ref: id, persona: h.persona, file: fileFor(h.line), line: h.line, text: h.hint, ts }))
+  const clock = localTime(ts, true)
+  await update($, watchAtom, s => ({
+    ...s,
+    hints: [...fresh, ...s.hints].slice(0, KEEP_HINTS),
+    status: hints.length > 0 ? `${plural(hints.length, 'hint')} at ${clock}` : `looked at ${clock}: nothing to add, keep writing`,
+    isHidden: hints.length === 0 ? s.isHidden : false,
+  }))
+  return true
+}
+
+// ===== ui =====
+// (was hooks/ui.tsx: the directory reads $ only into functions declared in this file)
+
+// The CoWriting pane (party, live, log, scope, progress), the reminder band and the live-hint band.
+
+
+
+type RenderInput = Parameters<Engine['ui']['resolve']>[0]
+
+type PaneProps = {
+  columns: number
+  snapshot: Snapshot
+  tab: Tab
+  personas: Persona[]
+  isGame: boolean
+  onTab: (tab: Tab) => void
+  onSummon: (id: string) => void
+  onAnnotate: (ref: string, use: string) => void
+  onRefresh: () => void
+  watch: WatchState
+  onWatchToggle: () => void
+  reviews: Review[]
+  /** the usage line's parts; empty hides it */
+  usage: string[]
+  onScopeCheck: () => void
+  onScopeEdit: () => void
+}
+
+// wide enough for "Terminologist 📋" and "Lv1 · asked 0×" with a gap to the next card
+const CARD = 17
+const SVG_SIZE = 44
+const USES = ['adopted', 'adapted', 'rejected', 'info'] as const
+// One key per button while the pane holds the keyboard (/cowrite:pane focuses it).
+const USE_HOTKEY: Readonly<Record<(typeof USES)[number], string>> = { adopted: 'a', adapted: 'd', rejected: 'x', info: 'i' }
+
+/** Subagents don't report how far they are: the bar fills with each step and only completes when done. */
+const reviewBar = (review: Review | undefined, width: number) => {
+  const steps = review?.steps ?? 0
+  const filled = review?.isDone ? width : Math.min(width - 1, Math.round(width * (1 - Math.exp(-steps / 6))))
+  return '▰'.repeat(filled) + '▱'.repeat(width - filled)
+}
+
+const bar = (value: number, max: number, width: number) => {
+  const filled = max <= 0 ? 0 : Math.max(0, Math.min(width, Math.round((value / max) * width)))
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
+}
+
+function sprite($: Engine, e: RenderInput, persona: Persona) {
+  if (e.surface === 'terminal') {
+    const { Raster } = $.ui.resolve(e)
+    const raster = rasterCells(persona)
+    return <Raster key={`sprite-${persona.id}`} columns={raster.columns} rows={raster.rows} cells={raster.cells} />
+  }
+  if (e.surface === 'desktop' || e.surface === 'vscode') {
+    const { Svg } = $.ui.resolve(e)
+    return <Svg source={svgSource(persona)} alt={persona.name} width={SVG_SIZE} height={SVG_SIZE} />
+  }
+  return null
+}
+
+export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const { snapshot, tab } = props
+  const columns = Math.max(CARD, props.columns)
+
+  if (snapshot.paper === null) {
+    return (
+      <Box flexDirection="column">
+        <Text weight="bold">CoWriting</Text>
+        <Text dimColor>No paper here yet. Open one with /cowrite:paper &lt;path&gt;</Text>
+        <Text dimColor>(/cowrite:paper alone lists recent ones), or set one up with /cowrite:init.</Text>
+      </Box>
+    )
+  }
+
+  const { paper, stats, progress } = snapshot
+  const tabs: Tab[] = props.isGame ? ['party', 'live', 'log', 'scope', 'progress'] : ['party', 'live', 'log', 'scope']
+  const tabLabel = (t: Tab) =>
+    t === 'party'
+      ? 'Party'
+      : t === 'live'
+        ? props.watch.isOn ? 'Live 👁' : 'Live'
+        : t === 'log'
+          ? `Log (${stats.unannotated})`
+          : t === 'scope'
+            ? snapshot.scope === null ? 'Scope' : `Scope ${pct(snapshot.scope.overall)}`
+            : 'Progress'
+
+  const header = (
+    <Box flexDirection="column">
+      <Text weight="bold">
+        ✍ {paper.name} <Text dimColor>· {paper.format} · {paper.language} · assist-only</Text>
+      </Text>
+      <Box flexDirection="row">
+        {tabs.map((t, i) => (
+          <Button
+            key={`tab-${t}`}
+            label={`${t === tab ? '▸ ' : ''}${tabLabel(t)}`}
+            hotkey={String(i + 1)}
+            variant={t === tab ? 'primary' : 'secondary'}
+            onPress={() => props.onTab(t)}
+          />
+        ))}
+        <Button key="refresh" label="↻" hotkey="r" onPress={props.onRefresh} />
+      </Box>
+      <Text dimColor>Esc back to prompt</Text>
+      {props.usage.length > 0 && <Text dimColor>⏱ {props.usage.join(' · ')}</Text>}
+    </Box>
+  )
+
+  if (tab === 'live') {
+    const { watch } = props
+    const latest = watch.hints[0]
+    const names = watch.personas.map(id => personaById(id)?.name ?? id).join(', ')
+    return (
+      <Box flexDirection="column">
+        {header}
+        <Text>
+          {watch.isOn ? '👁 Watching your manuscript' : 'Live review is off'}
+          {watch.status !== 'off' && <Text dimColor> · {watch.status}</Text>}
+        </Text>
+        {watch.isOn && <Text dimColor>Watching: {names}</Text>}
+        <Text dimColor>
+          Pause writing for about 20 s and the changed paragraphs get up to 3 short hints. Max one review a minute and 20 an
+          hour. Every review is logged.
+        </Text>
+        <Button key="watch-toggle" label={watch.isOn ? 'Stop watching' : 'Start watching'} hotkey="w" onPress={props.onWatchToggle} />
+        {watch.hints.length === 0 && <Text dimColor>No hints yet. Start with /cowrite:watch, then write.</Text>}
+        {watch.hints.map((hint, i) => (
+          <Text key={`hint-${i}`} dimColor={hint.ref !== latest?.ref}>
+            <Text weight="bold">{personaById(hint.persona)?.name ?? hint.persona}</Text> <Text dimColor>{hint.file}:{hint.line}</Text> {hint.text}
+          </Text>
+        ))}
+        {latest !== undefined && (
+          <Box flexDirection="row">
+            <Text dimColor>Latest hints: </Text>
+            {USES.map(use => (
+              <Button key={`live-${use}`} label={USE_LABELS[use].button} hotkey={USE_HOTKEY[use]} onPress={() => props.onAnnotate(latest.ref, use)} />
+            ))}
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
+  if (tab === 'log') {
+    const categories = Object.entries(stats.byCategory)
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, n]) => `${c} ${n}`)
+      .join(' · ')
+    // the turns waiting on a card are not listed a second time below them
+    const cards = stats.open.slice(0, 3)
+    const recent = stats.recent.filter(r => !cards.some(c => c.id === r.id))
+    return (
+      <Box flexDirection="column">
+        {header}
+        <Text>
+          AI turns: {stats.turns} (today {stats.today}) · unannotated:{' '}
+          <Text color={stats.unannotated > 0 ? 'warning' : 'success'}>{stats.unannotated}</Text>
+        </Text>
+        {categories !== '' && <Text dimColor>{categories}</Text>}
+        {stats.aiText > 0 && (
+          <Text color="error">⚠ {plural(stats.aiText, 'answer')} with AI-written text: disclose {stats.aiText === 1 ? 'it' : 'them'}.</Text>
+        )}
+        {snapshot.nudge !== null && <Text color="warning">🛡 {snapshot.nudge}</Text>}
+        {cards.length > 0 && (
+          <Box flexDirection="column">
+            <Text weight="bold">To classify: did you use it in your own text?</Text>
+            <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
+            {cards.map((turn, i) => classifyCard($, e, turn, i === 0, props.onAnnotate, columns))}
+          </Box>
+        )}
+        {recent.length > 0 && <Text weight="bold">{cards.length > 0 ? 'Earlier' : 'Recent'}</Text>}
+        {stats.recent.length === 0 && <Text dimColor>Nothing logged yet.</Text>}
+        {recent.map(r => (
+          <Text key={`turn-${r.id}`} dimColor={!r.isOpen}>
+            {r.isOpen ? '•' : '✓'} {localTime(r.ts)} [{r.category}]
+            {r.isAiText ? ' [AI-TEXT]' : ''} {cut(r.preview, Math.max(30, columns - 24))}
+          </Text>
+        ))}
+      </Box>
+    )
+  }
+
+  if (tab === 'scope') {
+    return (
+      <Box flexDirection="column">
+        {header}
+        {drawScope($, e, snapshot.scope, columns, props.onScopeCheck, props.onScopeEdit)}
+      </Box>
+    )
+  }
+
+  if (tab === 'progress' && progress !== null) {
+    const floor = xpForLevel(progress.level)
+    return (
+      <Box flexDirection="column">
+        {header}
+        <Text weight="bold">Level {progress.level}</Text>
+        <Text>
+          {bar(progress.xp - floor, progress.nextLevelXp - floor, Math.min(30, columns - 18))} {progress.xp} / {progress.nextLevelXp} XP
+        </Text>
+        <Text dimColor>
+          Writing {progress.writerXp} XP ({progress.ownWords} own words) · Transparency {progress.integrityXp} XP
+        </Text>
+        <Text>🔥 Streak: {plural(progress.streak, 'day')}</Text>
+        <Text weight="bold">Achievements</Text>
+        {ACHIEVEMENTS.map(a => {
+          const has = progress.game.achievements.includes(a.id)
+          return (
+            <Text key={`ach-${a.id}`} dimColor={!has}>
+              {has ? '🏆' : '·'} {a.title} <Text dimColor>– {a.detail}</Text>
+            </Text>
+          )
+        })}
+        <Text dimColor>XP comes from your own words and from transparency, never from AI use.</Text>
+      </Box>
+    )
+  }
+
+  const perRow = Math.max(1, Math.floor(columns / CARD))
+  const rows: Persona[][] = []
+  for (let i = 0; i < props.personas.length; i += perRow) rows.push(props.personas.slice(i, i + perRow))
+
+  return (
+    <Box flexDirection="column">
+      {header}
+      <Text dimColor>click a name to summon · 📋 briefed · /cowrite:party changes who is here</Text>
+      {rows.map((row, i) => (
+        <Box key={`row-${i}`} flexDirection="row">
+          {row.map(p => {
+            const level = progress?.personaLevels[p.id] ?? 1
+            const consults = stats.personaConsults[p.id] ?? 0
+            const running = props.reviews.find(r => r.persona === p.id && !r.isDone)
+            return (
+              <Box key={`card-${p.id}`} flexDirection="column" width={CARD}>
+                {sprite($, e, p)}
+                <Button key={`summon-${p.id}`} plain onPress={() => props.onSummon(p.id)}>
+                  <Text weight="bold">
+                    {p.short}
+                    {snapshot.briefed.includes(p.id) ? ' 📋' : ''}
+                  </Text>
+                </Button>
+                {running !== undefined ? (
+                  <Text color="warning">{reviewBar(running, 8)}</Text>
+                ) : (
+                  <Text dimColor>
+                    {props.isGame ? `Lv${level} · ` : ''}asked {consults}×
+                  </Text>
+                )}
+              </Box>
+            )
+          })}
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+const pct = (n: number) => `${Math.round(n * 100)} %`
+// the Scope tab's bar labels ("≈ Overall" is the longest) and a gap before the bar
+const LABEL = 10
+
+const POINT_ICON: Record<string, string> = { covered: '✓', partial: '◐', missing: '○' }
+const pointIcon = (p: ScopePoint) => (p.isTicked ? '☑' : POINT_ICON[p.status ?? ''] ?? '·')
+
+const countText = (label: string, c: Count) => (c.target === undefined ? `${label} ${c.done}` : `${label} ${c.done}/${c.target}`)
+
+/** The Scope tab: the author's plan against what the manuscript has so far. */
+function drawScope($: Engine, e: RenderInput, scope: ScopeProgress | null, columns: number, onCheck: () => void, onEdit: () => void) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const width = Math.max(10, Math.min(30, columns - 26))
+  if (scope === null) {
+    return (
+      <Box flexDirection="column">
+        <Text>No scope yet.</Text>
+        <Text dimColor>
+          Describe in scope.md what the paper should achieve: the goal, the points to make, words or pages, figures, tables,
+          references, sections and the deadline. Then this tab shows how far you are.
+        </Text>
+        <Button key="scope-edit" label="Set the scope with me" hotkey="e" onPress={onEdit} />
+      </Box>
+    )
+  }
+  const covered = scope.points.filter(p => p.isTicked || p.status === 'covered').length
+  const partial = scope.points.filter(p => !p.isTicked && p.status === 'partial').length
+  const line = (label: string, value: number, note = '') => (
+    <Text key={`scope-bar-${label}`}>
+      {label.padEnd(LABEL)}
+      {bar(value, 1, width)} {pct(value)}
+      <Text dimColor>{note}</Text>
+    </Text>
+  )
+  return (
+    <Box flexDirection="column">
+      {scope.goal !== '' && (
+        <Text>
+          🎯 <Text dimColor>{cut(scope.goal.replace(/\s+/g, ' '), Math.max(30, columns * 2 - 10))}</Text>
+        </Text>
+      )}
+      {line('≈ Overall', scope.overall, ' estimate')}
+      {line('Content', scope.content, ' points and quantities')}
+      {scope.finish === null ? (
+        <Text dimColor>{'Finish'.padEnd(LABEL)}set the stage of each section in scope.md (outline, draft, revised, final) for an estimate</Text>
+      ) : (
+        line('Finish', scope.finish, ` stages${scope.markers > 0 ? ` · ${scope.markers} open markers` : ''}`)
+      )}
+      <Text>
+        {countText('Words', scope.words)} · {countText('Figures', scope.figures)} · {countText('Tables', scope.tables)} ·{' '}
+        {countText('References', scope.references)}
+      </Text>
+      {scope.daysLeft !== undefined && (
+        <Text color={scope.daysLeft < 0 ? 'error' : scope.daysLeft < 14 ? 'warning' : undefined}>
+          ⏳ {scope.deadline}: {scope.daysLeft < 0 ? `${-scope.daysLeft} days past` : `${scope.daysLeft} days left`}
+          {scope.wordsPerDay !== undefined && scope.wordsPerDay > 0 ? ` · ${scope.wordsPerDay} words a day to reach the target` : ''}
+        </Text>
+      )}
+      {scope.points.length > 0 && (
+        <Box flexDirection="column">
+          <Text weight="bold">
+            Points {covered}/{scope.points.length}
+            {partial > 0 ? ` (+${partial} partial)` : ''}{' '}
+            <Text dimColor>
+              {scope.checkedAt === undefined ? '· not checked yet' : `· checked ${localTime(scope.checkedAt)}`}
+            </Text>
+          </Text>
+          {scope.points.map((p, i) => (
+            <Text key={`point-${i}`} dimColor={p.isTicked || p.status === 'covered'}>
+              {pointIcon(p)} {cut(p.text, Math.max(30, columns - 24))}
+              <Text dimColor>
+                {p.where ? ` · ${p.where.replace(/^manuscript\//, '')}` : ''}
+                {p.note && !p.isTicked ? ` · ${p.note}` : ''}
+              </Text>
+            </Text>
+          ))}
+        </Box>
+      )}
+      {scope.sections.length > 0 && (
+        <Box flexDirection="column">
+          <Text weight="bold">Sections</Text>
+          {scope.sections.map((s, i) => (
+            <Text key={`section-${i}`} dimColor={!s.isFound}>
+              {cut(s.name, 16).padEnd(17)}
+              {s.target === undefined ? `${s.words} words`.padEnd(12) : `${bar(s.words, s.target, 8)} ${s.words}/${s.target}`}
+              <Text dimColor>
+                {s.stage ? ` · ${s.stage}` : ''}
+                {s.markers > 0 ? ` · ${s.markers} open` : ''}
+                {!s.isFound ? ' · no heading yet' : ''}
+              </Text>
+            </Text>
+          ))}
+        </Box>
+      )}
+      <Box flexDirection="row">
+        <Button key="scope-check" label="Check points" hotkey="c" onPress={onCheck} />
+        <Button key="scope-edit" label="Edit scope" hotkey="e" onPress={onEdit} />
+      </Box>
+      <Text dimColor>
+        Counted without AI; points are checked by a small model on request (logged). ☑ ticked by you · ✓ covered · ◐ partial
+        · ○ missing. Overall = 70 % content + 30 % finish, an estimate.
+      </Text>
+    </Box>
+  )
+}
+
+const whoSaid = (turn: RecentTurn) => (turn.persona !== undefined ? personaById(turn.persona)?.name ?? turn.persona : 'Claude')
+
+/** One AI input to classify: who said it, what you asked, what it said, and the four choices. */
+function classifyCard($: Engine, e: RenderInput, turn: RecentTurn, isFirst: boolean, onAnnotate: (ref: string, use: string) => void, columns: number) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const width = Math.max(20, columns - 14)
+  const asked = turn.origin === 'agent' ? `its report on your text` : `“${cut(turn.preview, width - 2)}”`
+  return (
+    <Box key={`classify-${turn.id}`} flexDirection="column">
+      <Text>
+        <Text weight="bold">{whoSaid(turn)}</Text>{' '}
+        <Text dimColor>
+          · {localTime(turn.ts)} · {turn.category}
+          {isFirst ? ` · keys ${USES.map(use => USE_HOTKEY[use]).join(' ')}` : ''}
+        </Text>
+      </Text>
+      <Text dimColor>  you asked: {asked}</Text>
+      <Text>  it said: {cut(turn.answer || '(no text)', width * 2)}</Text>
+      <Box flexDirection="row">
+        {USES.map(use => (
+          <Button
+            key={`use-${turn.id}-${use}`}
+            label={USE_LABELS[use].button}
+            hotkey={isFirst ? USE_HOTKEY[use] : undefined}
+            onPress={() => onAnnotate(turn.id, use)}
+          />
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
+/** Claude Code's own step, as one dim line (calm) or nothing (focus). */
+export function drawToolLine($: Engine, e: RenderInput, props: { label: string; isRunning: boolean; isHidden: boolean }) {
+  const { Box, Text } = $.ui.resolve(e)
+  if (props.isHidden) return <Box />
+  return (
+    <Text dimColor>
+      · {props.label}
+      {props.isRunning ? ' …' : ''}
+    </Text>
+  )
+}
+
+/** The turn's closing line while personas are still at work. */
+export function drawWaiting($: Engine, e: RenderInput, names: readonly string[]) {
+  const { Text } = $.ui.resolve(e)
+  return <Text dimColor>⏳ waiting for {names.join(', ')}…</Text>
+}
+
+type ReviewRowProps = { persona: Persona; review: Review | undefined; isFailed: boolean }
+
+/** A persona's Agent call in the transcript: one line with a progress bar. */
+export function drawReviewRow($: Engine, e: RenderInput, props: ReviewRowProps) {
+  const { Box, Text } = $.ui.resolve(e)
+  const { persona, review, isFailed } = props
+  const steps = review?.steps ?? 0
+  const status = isFailed ? 'stopped' : review?.isDone ? `done · ${steps} steps` : `${steps} steps · ${review?.lastStep ?? 'starting'}`
+  return (
+    <Box flexDirection="row">
+      <Text>
+        🎭 <Text weight="bold">{persona.name}</Text>{' '}
+      </Text>
+      <Text color={isFailed ? 'error' : review?.isDone ? 'success' : 'warning'}>{reviewBar(review, 12)}</Text>
+      <Text dimColor> {status}</Text>
+    </Box>
+  )
+}
+
+type LiveBandProps = {
+  watch: WatchState
+  onAnnotate: (ref: string, use: string) => void
+  onHide: () => void
+}
+
+/** The newest live hints, above the prompt, where the author looks between sentences. */
+export function drawLiveBand($: Engine, e: RenderInput, props: LiveBandProps) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const ref = props.watch.hints[0]?.ref
+  const latest = props.watch.hints.filter(one => one.ref === ref)
+  return (
+    <Box flexDirection="column">
+      {latest.map((hint, i) => (
+        <Text key={`band-hint-${i}`}>
+          👁 <Text weight="bold">{personaById(hint.persona)?.name ?? hint.persona}</Text> <Text dimColor>{hint.file}:{hint.line}</Text> {hint.text}
+        </Text>
+      ))}
+      <Box flexDirection="row">
+        {ref !== undefined &&
+          USES.map(use => (
+            <Button key={`band-live-${use}`} label={USE_LABELS[use].button} onPress={() => props.onAnnotate(ref, use)} />
+          ))}
+        <Button key="band-live-hide" label="Hide" role="dismiss" onPress={props.onHide} />
+      </Box>
+    </Box>
+  )
+}
+
+type BandProps = {
+  snapshot: Snapshot
+  onAnnotate: (ref: string, use: string) => void
+  onHide: () => void
+}
+
+export function drawBand($: Engine, e: RenderInput, props: BandProps) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const { stats } = props.snapshot
+  const open = stats.open[0]
+  const message = props.snapshot.lastWasAiText
+    ? 'The last answer contains AI-written text: it is logged for your disclosure.'
+    : props.snapshot.nudge ?? `${plural(stats.unannotated, 'AI input')} to classify.`
+  return (
+    <Box flexDirection="column">
+      <Text color="warning">🛡 {message}</Text>
+      {open !== undefined && (
+        <Text>
+          {'   '}Did you use this in your text? <Text weight="bold">{whoSaid(open)}:</Text>{' '}
+          <Text dimColor>“{cut(open.answer, 100)}”</Text>
+        </Text>
+      )}
+      <Box flexDirection="row">
+        {open !== undefined &&
+          USES.map(use => (
+            <Button key={`band-${use}`} label={USE_LABELS[use].button} onPress={() => props.onAnnotate(open.id, use)} />
+          ))}
+        <Button key="band-hide" label="Hide" role="dismiss" onPress={props.onHide} />
+      </Box>
+    </Box>
+  )
+}
+
+// ===== register =====
+// (was hooks/register.tsx: the directory reads $ only into functions declared in this file)
+
 
 const PANE = 'cowriting'
 const CONTRACT_SECTION = 'cowriting-contract'
@@ -80,7 +1571,6 @@ export const snapshotAtom = atom({ plugin: 'cowrite', key: 'snapshot' } as const
 export const tabAtom = atom({ plugin: 'cowrite', key: 'tab' } as const, 'party' as Tab)
 export const bandHiddenAtom = atom({ plugin: 'cowrite', key: 'isBandHidden' } as const, false)
 // the same value watch.ts keeps; the state scan wants each module's atoms declared in that module
-const watchAtom = atom({ plugin: 'cowrite', key: 'watch' } as const, IDLE_WATCH, { shape: 'watch-2' })
 const focusAtom = atom({ plugin: 'cowrite', key: 'focus' } as const, null as FocusMode | null)
 const usageAtom = atom({ plugin: 'cowrite', key: 'usage' } as const, EMPTY_USAGE as Usage, { shape: 'usage-1' })
 const FOCUS_MODES: readonly FocusMode[] = ['off', 'calm', 'focus']
@@ -183,10 +1673,10 @@ async function showStatus($: Engine, cfg: Config): Promise<void> {
   $.ui.status(parts.join(' · '))
 }
 
-async function measure($: Engine, cfg: Config, next: Usage): Promise<void> {
+async function measure($: Engine, cfg: Config, latest: Usage): Promise<void> {
   const before = await read($, usageAtom)
-  await update($, usageAtom, () => next)
-  const alert = cfg.meter === 'tokens+limits' ? limitCrossed(before.limits, next.limits) : undefined
+  await update($, usageAtom, () => latest)
+  const alert = cfg.meter === 'tokens+limits' ? limitCrossed(before.limits, latest.limits) : undefined
   if (alert !== undefined) $.ui.toast(`⚠ ${alert}`)
   await showStatus($, cfg)
 }
@@ -299,8 +1789,8 @@ async function partyCommand($: Engine, cfg: Config, paper: Paper, verb: string, 
     const own = unknown.filter(w => customPersonas().some(p => p.id === w))
     if (own.length > 0 && verb === 'remove') return `${own.join(', ')}: your own experts are their files; delete party/<id>.md to retire one.`
     if (unknown.length > 0) return `Not in the catalogue: ${unknown.join(', ')}. It has: ${PERSONAS.map(p => p.id).join(', ')}.`
-    const next = verb === 'add' ? [...catalog, ...words.filter(w => !catalog.includes(w))] : catalog.filter(id => !words.includes(id))
-    await writeParty($, paper.root, next)
+    const roster = verb === 'add' ? [...catalog, ...words.filter(w => !catalog.includes(w))] : catalog.filter(id => !words.includes(id))
+    await writeParty($, paper.root, roster)
     await refresh($, cfg)
     const names = words.map(w => personaById(w)?.name ?? w).join(', ')
     return verb === 'add' ? `${names} joined the party.` : `${names} left the party.`
@@ -889,7 +2379,7 @@ export const register: Register = (on, options) => {
       onWatchToggle: () => void setWatching($, cfg, !watch.isOn),
       personas: partyPersonas(snapshot.paper?.party ?? []),
       isGame,
-      onTab: next => void update($, tabAtom, () => next),
+      onTab: tab => void update($, tabAtom, () => tab),
       onSummon: id => void summon($, cfg, id, ''),
       onAnnotate: (ref, use) => void annotate($, cfg, ref, use),
       onRefresh: () => void refresh($, cfg),

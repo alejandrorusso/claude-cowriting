@@ -29,9 +29,8 @@ import {
   watchExcerpt,
 } from '../hooks/core'
 import { DEFAULT_PARTY, PERSONAS, SHARED_PALETTE, isCustomId, parsePersonaFile, partyPersonas, personaFileSkeleton } from '../hooks/personas'
-import { parseCheck, parseScope, scopeProgress } from '../hooks/scope'
 import { rasterCells, svgSource } from '../hooks/sprites'
-import { withLog } from '../hooks/workspace'
+import { parseCheck, parseScope, scopeProgress, withLog } from '../hooks/register'
 
 const ROOT = '/w'
 
