@@ -974,13 +974,13 @@ export async function watchTick($: Engine, model: string): Promise<boolean> {
 
   seen.isBusy = true
   try {
-    return await review($, paper, state, model, now, recent)
+    return await reviewChanges($, paper, state, model, now, recent)
   } finally {
     seen.isBusy = false
   }
 }
 
-async function review($: Engine, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
+async function reviewChanges($: Engine, paper: Paper, state: WatchState, model: string, now: number, recent: number[]): Promise<boolean> {
   const parts: { file: string; changed: Paragraph[] }[] = []
   for (const path of seen.dirty) {
     const after = await readText($, path).catch(() => null)
