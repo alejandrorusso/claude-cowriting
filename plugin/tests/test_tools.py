@@ -10,6 +10,7 @@ says is checked word by word where it matters.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import io
 import json
 import os
@@ -188,8 +189,14 @@ class PaperWorkspace(unittest.TestCase):
         done = run("ailog.py", "annotate", "last", "--use", "rejected", "--note", "kept my spelling", cwd=self.root)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("Annotated a2 as rejected", done.stdout)
-        lines = (self.root / "ai-log" / "2026-10.jsonl").read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(lines), len(FIXTURE) + 1, "annotations are appended, nothing else is touched")
+        # the annotation goes to the current month's file, the fixture's file stays as it was
+        month = f"{dt.datetime.now(dt.timezone.utc):%Y-%m}"
+        lines = (self.root / "ai-log" / f"{month}.jsonl").read_text(encoding="utf-8").splitlines()
+        expected = len(FIXTURE) + 1 if month == "2026-10" else 1
+        self.assertEqual(len(lines), expected, "annotations are appended, nothing else is touched")
+        if month != "2026-10":
+            october = (self.root / "ai-log" / "2026-10.jsonl").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(october), len(FIXTURE), "the fixture's month is untouched")
         self.assertEqual(json.loads(lines[-1])["note"], "kept my spelling")
         self.assertIn("unannotated: 0", run("ailog.py", "stats", cwd=self.root).stdout)
         ambiguous = run("ailog.py", "annotate", "a", "--use", "info", cwd=self.root)
