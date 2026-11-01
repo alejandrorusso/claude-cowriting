@@ -408,7 +408,7 @@ test('live review sees only changed paragraphs and keeps at most three hints', a
     '{"persona":"style-coach","line":3,"hint":"a"},{"persona":"architect","line":3,"hint":"b"}]'
   const hints = parseHints(answer, ['terminologist', 'grammar-guy', 'style-coach', 'architect'])
   expect(hints.length).toBe(3)
-  expect(hints.map(h => h.persona)).not.toContain('reviewer-2')
+  expect(hints.map(hint => hint.persona)).not.toContain('reviewer-2')
   expect(parseHints('no JSON here', ['terminologist']).length).toBe(0)
 })
 

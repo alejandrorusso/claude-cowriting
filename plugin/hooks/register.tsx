@@ -544,11 +544,11 @@ const number = (text: string): number | undefined => {
 }
 
 const sectionKind = (heading: string): 'goal' | 'targets' | 'sections' | 'points' | undefined => {
-  const h = heading.toLowerCase()
-  if (/goal|ziel/.test(h)) return 'goal'
-  if (/target|umfang|vorgabe/.test(h)) return 'targets'
-  if (/section|kapitel|abschnitt|gliederung|outline/.test(h)) return 'sections'
-  if (/point|kernaussage|aussage|punkt/.test(h)) return 'points'
+  const lower = heading.toLowerCase()
+  if (/goal|ziel/.test(lower)) return 'goal'
+  if (/target|umfang|vorgabe/.test(lower)) return 'targets'
+  if (/section|kapitel|abschnitt|gliederung|outline/.test(lower)) return 'sections'
+  if (/point|kernaussage|aussage|punkt/.test(lower)) return 'points'
   return undefined
 }
 
@@ -649,9 +649,9 @@ const citekeys = (files: readonly TextFile[]): Set<string> => {
 }
 
 const matches = (heading: string, name: string) => {
-  const h = heading.toLowerCase()
+  const lower = heading.toLowerCase()
   const n = name.toLowerCase()
-  return h !== '' && (h === n || h.includes(n) || n.includes(h))
+  return lower !== '' && (lower === n || lower.includes(n) || n.includes(lower))
 }
 
 const STAGE_VALUE: Record<Stage, number> = { outline: 0, draft: 0.4, revised: 0.75, final: 1 }
@@ -1037,15 +1037,15 @@ async function review($: Engine, paper: Paper, state: WatchState, model: string,
     ref: id,
     ts,
     model,
-    personas: [...new Set(hints.map(h => h.persona))],
+    personas: [...new Set(hints.map(hint => hint.persona))],
     tools_used: [],
     ai_text_flag: false,
-    answer: hints.length > 0 ? hints.map(h => `${h.persona} l.${h.line}: ${h.hint}`).join('\n') : '(no hints)',
+    answer: hints.length > 0 ? hints.map(hint => `${hint.persona} l.${hint.line}: ${hint.hint}`).join('\n') : '(no hints)',
   })
 
   const fileFor = (line: number) =>
     parts.find(p => p.changed.some(c => line >= c.start && line <= c.end))?.file ?? parts[0]!.file
-  const fresh: LiveHint[] = hints.map(h => ({ ref: id, persona: h.persona, file: fileFor(h.line), line: h.line, text: h.hint, ts }))
+  const fresh: LiveHint[] = hints.map(hint => ({ ref: id, persona: hint.persona, file: fileFor(hint.line), line: hint.line, text: hint.hint, ts }))
   const clock = localTime(ts, true)
   await update($, watchAtom, s => ({
     ...s,
