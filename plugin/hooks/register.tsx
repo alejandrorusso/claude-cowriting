@@ -1983,20 +1983,23 @@ export const register: Register = (on, options) => {
     if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const state = await read($, watchAtom)
-    const verb = words[0] === 'on' || words[0] === 'off' ? words.shift()! : words.length > 0 ? 'on' : state.isOn ? 'off' : 'on'
+    // nothing derived from the event is changed in place: the directory reads a mutating call as a changed command
+    const hasVerb = words[0] === 'on' || words[0] === 'off'
+    const verb = hasVerb ? words[0] : words.length > 0 ? 'on' : state.isOn ? 'off' : 'on'
+    const chosen = hasVerb ? words.slice(1) : words
     if (verb === 'off') {
       await setWatching($, cfg, false)
       return { text: 'Live review stopped.' }
     }
     const active = partyPersonas(paper.party)
     let personas: string[] | undefined
-    if (words.includes('all')) personas = active.map(p => p.id)
-    else if (words.length > 0) {
-      const unknown = words.filter(w => personaById(w) === undefined || !active.includes(personaById(w)!))
+    if (chosen.includes('all')) personas = active.map(p => p.id)
+    else if (chosen.length > 0) {
+      const unknown = chosen.filter(w => personaById(w) === undefined || !active.includes(personaById(w)!))
       if (unknown.length > 0) {
         return { text: `Unknown persona(s): ${unknown.join(', ')}. Choose from: ${active.map(p => p.id).join(', ')}, or all.` }
       }
-      personas = words.map(w => personaById(w)!.id)
+      personas = chosen.map(w => personaById(w)!.id)
     }
     await setWatching($, cfg, true, personas)
     const names = (await read($, watchAtom)).personas.map(id => personaById(id)?.name ?? id).join(', ')
