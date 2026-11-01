@@ -1570,7 +1570,6 @@ export const snapshotAtom = atom({ plugin: 'cowrite', key: 'snapshot' } as const
 })
 export const tabAtom = atom({ plugin: 'cowrite', key: 'tab' } as const, 'party' as Tab)
 export const bandHiddenAtom = atom({ plugin: 'cowrite', key: 'isBandHidden' } as const, false)
-// the same value watch.ts keeps; the state scan wants each module's atoms declared in that module
 const focusAtom = atom({ plugin: 'cowrite', key: 'focus' } as const, null as FocusMode | null)
 const usageAtom = atom({ plugin: 'cowrite', key: 'usage' } as const, EMPTY_USAGE as Usage, { shape: 'usage-1' })
 const FOCUS_MODES: readonly FocusMode[] = ['off', 'calm', 'focus']
