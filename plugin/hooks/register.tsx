@@ -25,10 +25,14 @@ type Engine = EngineInterface
 
 const join = (...parts: string[]) => parts.join('/').replace(/\/+/g, '/')
 
-async function readJson<T>($: Engine, path: string): Promise<T | undefined> {
+/**
+ * The parsed JSON at `path`, or undefined when the file is missing or not JSON. The caller names the
+ * shape on its variable: a type argument on the call would hide the `$` from the directory's reader.
+ */
+async function readJson($: Engine, path: string): Promise<any> {
   try {
     if (!(await $.fs.exists(path))) return undefined
-    return JSON.parse(await $.fs.read(path)) as T
+    return JSON.parse(await $.fs.read(path))
   } catch {
     return undefined
   }
@@ -61,18 +65,18 @@ const KEEP_RECENT = 8
 export async function findPaper($: Engine): Promise<Paper | null> {
   const chosen = await read($, paperRootAtom)
   if (chosen !== null) {
-    const json = await readJson<PaperJson>($, join(chosen, 'paper.json'))
+    const json: PaperJson | undefined = await readJson($, join(chosen, 'paper.json'))
     if (json !== undefined) return asPaper(chosen, json)
   }
   const cwd = await $.session.cwd()
-  const here = await readJson<PaperJson>($, join(cwd, 'paper.json'))
+  const here: PaperJson | undefined = await readJson($, join(cwd, 'paper.json'))
   if (here !== undefined) return asPaper(cwd, here)
 
   const marker = join(cwd, '.active-project')
   if (await $.fs.exists(marker)) {
     const name = (await $.fs.read(marker)).trim()
     const root = join(cwd, 'projects', name)
-    const json = await readJson<PaperJson>($, join(root, 'paper.json'))
+    const json: PaperJson | undefined = await readJson($, join(root, 'paper.json'))
     if (json !== undefined) return asPaper(root, json)
   }
   return null
@@ -132,8 +136,8 @@ export async function loadParty($: Engine, root: string): Promise<string[]> {
 /** Writes the roster of catalogue members into paper.json, keeping everything else in it. */
 export async function writeParty($: Engine, root: string, ids: readonly string[]): Promise<void> {
   const path = join(root, 'paper.json')
-  const json = (await readJson<PaperJson & Record<string, unknown>>($, path)) ?? {}
-  const { domainPack: _pack, ...rest } = json
+  const json: (PaperJson & Record<string, unknown>) | undefined = await readJson($, path)
+  const { domainPack: _pack, ...rest } = json ?? {}
   await $.fs.write(path, `${JSON.stringify({ ...rest, party: ids }, null, 2)}\n`)
 }
 
@@ -263,7 +267,7 @@ export async function manuscriptWords($: Engine, paper: Paper): Promise<number> 
 const gamePath = (root: string) => join(root, '.cowriting', 'game.json')
 
 export async function readGame($: Engine, root: string): Promise<GameFile> {
-  const game = await readJson<GameFile>($, gamePath(root))
+  const game: GameFile | undefined = await readJson($, gamePath(root))
   return game?.version === 1 ? { ...NEW_GAME, ...game } : NEW_GAME
 }
 
@@ -274,9 +278,9 @@ export async function writeGame($: Engine, root: string, game: GameFile): Promis
 /** Counts the tools write: verified references and generated disclosures. */
 export async function readToolCounts($: Engine, root: string) {
   // 0.2.0 writes the summary in Claude's place; a run before that left it in literature/
-  const verify =
-    (await readJson<{ ok?: number }>($, join(root, '.cowriting', 'verify.json'))) ??
-    (await readJson<{ ok?: number }>($, join(root, 'literature', '.verify.json')))
+  const current: { ok?: number } | undefined = await readJson($, join(root, '.cowriting', 'verify.json'))
+  const earlier: { ok?: number } | undefined = await readJson($, join(root, 'literature', '.verify.json'))
+  const verify = current ?? earlier
   const disclosureDir = join(root, 'disclosure')
   const disclosures = (await $.fs.exists(disclosureDir))
     ? (await $.fs.list(disclosureDir)).filter(f => f.name.startsWith('ai-register')).length
@@ -332,7 +336,7 @@ export async function openPaper($: Engine, arg: string): Promise<string> {
   const kind = await kindOf($, root)
   if (kind === 'none' || kind === 'other') return `No folder ${root}.`
   if (kind === 'file') root = root.replace(/\/[^/]+$/, '') || '/'
-  const json = await readJson<PaperJson>($, join(root, 'paper.json'))
+  const json: PaperJson | undefined = await readJson($, join(root, 'paper.json'))
   if (json === undefined) {
     return `${root} is not a CoWriting paper yet. Set it up there with /cowrite:init ${root}`
   }

@@ -2,7 +2,13 @@
 
 Assist-only academic co-writing for Claude Code, following the DFG's good scientific practice. Claude gives hints, critique and literature help; it never writes your manuscript. Every AI input is logged, the log becomes the AI disclosure you sign, and a pixel-art review party you compose yourself reads your text from ten perspectives.
 
-The full documentation, with install steps, the commands, the review party and the DFG rationale, is in the repository: https://github.com/dozwa/claude-cowriting
+Install it in Claude Code with:
+
+```
+/plugin install cowrite --marketplace dozwa/claude-cowriting
+```
+
+The full documentation, with the commands, the review party and the DFG rationale, is in the repository: https://github.com/dozwa/claude-cowriting
 
 ## What the plugin does on your machine
 
