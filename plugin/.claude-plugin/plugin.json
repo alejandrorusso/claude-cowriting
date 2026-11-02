@@ -32,12 +32,8 @@
     "language": {
       "type": "string",
       "title": "Default language",
-      "description": "Default language for new papers and disclosures.",
-      "default": "en",
-      "options": [
-        "en",
-        "de"
-      ]
+      "description": "Default language for new papers and disclosures. Allowed values: \"en\", \"de\".",
+      "default": "en"
     },
     "autosave": {
       "type": "boolean",
@@ -66,24 +62,14 @@
     "focusMode": {
       "type": "string",
       "title": "Focus mode",
-      "description": "How much of Claude Code's own work the transcript shows: off (all), calm (one dim line per action), focus (only you and the personas). /cowrite:quiet switches it per session.",
-      "default": "calm",
-      "options": [
-        "off",
-        "calm",
-        "focus"
-      ]
+      "description": "How much of Claude Code's own work the transcript shows: off (all), calm (one dim line per action), focus (only you and the personas). Allowed values: \"off\", \"calm\", \"focus\". /cowrite:quiet switches it per session.",
+      "default": "calm"
     },
     "usageMeter": {
       "type": "string",
       "title": "Usage meter",
-      "description": "Token counter in the pane and status line; with limits it also watches the 5-hour and weekly limits of a Pro/Max plan and warns at 80 % and 95 %.",
-      "default": "tokens+limits",
-      "options": [
-        "off",
-        "tokens",
-        "tokens+limits"
-      ]
+      "description": "Token counter in the pane and status line; with limits it also watches the 5-hour and weekly limits of a Pro/Max plan and warns at 80 % and 95 %. Allowed values: \"off\", \"tokens\", \"tokens+limits\".",
+      "default": "tokens+limits"
     }
   }
 }
