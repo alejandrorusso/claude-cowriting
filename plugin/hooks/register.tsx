@@ -4,8 +4,8 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, Usage, WatchState } from '../types'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, computeStats, countWords, cut, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, Usage, WatchState } from '../types'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -1093,7 +1093,7 @@ async function reviewChanges($: Engine, paper: Paper, state: WatchState, model: 
 // ===== ui =====
 // (was hooks/ui.tsx: the directory reads $ only into functions declared in this file)
 
-// The CoWriting pane (party, live, log, scope, progress), the reminder band and the live-hint band.
+// The CoWriting pane (party, feedback, live, log, scope, progress), the reminder band and the live-hint band.
 
 
 
@@ -1101,14 +1101,27 @@ type RenderInput = Parameters<Engine['ui']['resolve']>[0]
 
 type PaneProps = {
   columns: number
+  /** where the surface seated the pane: beside the transcript, or above the prompt sharing its room */
+  placement: 'dock' | 'inline'
   snapshot: Snapshot
   tab: Tab
   personas: Persona[]
   isGame: boolean
   onTab: (tab: Tab) => void
   onSummon: (id: string) => void
-  onAnnotate: (ref: string, use: string) => void
+  /** classifies a turn; the note, when given, goes into the log entry and the prompts appendix */
+  onAnnotate: (ref: string, use: string, note?: string) => void
   onRefresh: () => void
+  /** the AI input opened to read whole on the Feedback tab, if any */
+  reading: Reading | null
+  onOpen: (id: string) => void
+  /** the badge on a persona's card: the Feedback tab, on that persona's newest open input */
+  onOpenFor: (personaId: string) => void
+  onCloseReading: () => void
+  /** asks the model what the manuscript's diff since the opened turn shows */
+  onSummarize: () => void
+  /** the comment typed, or taken from the summary */
+  onNote: (text: string, isTyped: boolean) => void
   watch: WatchState
   onWatchToggle: () => void
   reviews: Review[]
@@ -1121,6 +1134,8 @@ type PaneProps = {
 // wide enough for "Terminologist 📋" and "Lv1 · asked 0×" with a gap to the next card
 const CARD = 17
 const SVG_SIZE = 44
+// a sprite beside one line of text, for the list the pane shows inline above the prompt
+const SVG_SMALL = 22
 const USES = ['adopted', 'adapted', 'rejected', 'info'] as const
 // One key per button while the pane holds the keyboard (/cowrite:pane focuses it).
 const USE_HOTKEY: Readonly<Record<(typeof USES)[number], string>> = { adopted: 'a', adapted: 'd', rejected: 'x', info: 'i' }
@@ -1137,7 +1152,7 @@ const bar = (value: number, max: number, width: number) => {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
-function sprite($: Engine, e: RenderInput, persona: Persona) {
+function sprite($: Engine, e: RenderInput, persona: Persona, size = SVG_SIZE) {
   if (e.surface === 'terminal') {
     const { Raster } = $.ui.resolve(e)
     const raster = rasterCells(persona)
@@ -1145,7 +1160,7 @@ function sprite($: Engine, e: RenderInput, persona: Persona) {
   }
   if (e.surface === 'desktop' || e.surface === 'vscode') {
     const { Svg } = $.ui.resolve(e)
-    return <Svg source={svgSource(persona)} alt={persona.name} width={SVG_SIZE} height={SVG_SIZE} />
+    return <Svg source={svgSource(persona)} alt={persona.name} width={size} height={size} />
   }
   return null
 }
@@ -1154,6 +1169,11 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const { snapshot, tab } = props
   const columns = Math.max(CARD, props.columns)
+  // Inline above the prompt (VS Code, the desktop app without a dock) the pane takes its rows from the
+  // transcript, and the frame fits the tree: so the party is a short list with small sprites and the
+  // help lines are folded into one. The terminal's inline pane keeps the grid, since a raster sprite
+  // is eight rows tall either way.
+  const isCompact = props.placement === 'inline' && e.surface !== 'terminal'
 
   if (snapshot.paper === null) {
     return (
@@ -1166,17 +1186,19 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
   }
 
   const { paper, stats, progress } = snapshot
-  const tabs: Tab[] = props.isGame ? ['party', 'live', 'log', 'scope', 'progress'] : ['party', 'live', 'log', 'scope']
+  const tabs: Tab[] = props.isGame ? ['party', 'feedback', 'live', 'log', 'scope', 'progress'] : ['party', 'feedback', 'live', 'log', 'scope']
   const tabLabel = (t: Tab) =>
     t === 'party'
       ? 'Party'
-      : t === 'live'
-        ? props.watch.isOn ? 'Live 👁' : 'Live'
-        : t === 'log'
-          ? `Log (${stats.unannotated})`
-          : t === 'scope'
-            ? snapshot.scope === null ? 'Scope' : `Scope ${pct(snapshot.scope.overall)}`
-            : 'Progress'
+      : t === 'feedback'
+        ? stats.unannotated > 0 ? `Feedback (${stats.unannotated})` : 'Feedback'
+        : t === 'live'
+          ? props.watch.isOn ? 'Live 👁' : 'Live'
+          : t === 'log'
+            ? 'Log'
+            : t === 'scope'
+              ? snapshot.scope === null ? 'Scope' : `Scope ${pct(snapshot.scope.overall)}`
+              : 'Progress'
 
   const header = (
     <Box flexDirection="column">
@@ -1195,15 +1217,21 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
         ))}
         <Button key="refresh" label="↻" hotkey="r" onPress={props.onRefresh} />
       </Box>
-      <Text dimColor>Esc back to prompt</Text>
+      {!isCompact && <Text dimColor>Esc back to prompt</Text>}
       {props.usage.length > 0 && <Text dimColor>⏱ {props.usage.join(' · ')}</Text>}
     </Box>
   )
 
   if (tab === 'live') {
     const { watch } = props
-    const latest = watch.hints[0]
     const names = watch.personas.map(id => personaById(id)?.name ?? id).join(', ')
+    // one review's hints share a ref and are classified together; a classified review leaves the list
+    const reviews: LiveHint[][] = []
+    for (const hint of watch.hints) {
+      const group = reviews.find(g => g[0]!.ref === hint.ref)
+      if (group === undefined) reviews.push([hint])
+      else group.push(hint)
+    }
     return (
       <Box flexDirection="column">
         {header}
@@ -1212,23 +1240,71 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
           {watch.status !== 'off' && <Text dimColor> · {watch.status}</Text>}
         </Text>
         {watch.isOn && <Text dimColor>Watching: {names}</Text>}
-        <Text dimColor>
-          Pause writing for about 20 s and the changed paragraphs get up to 3 short hints. Max one review a minute and 20 an
-          hour. Every review is logged.
-        </Text>
+        {!isCompact && (
+          <Text dimColor>
+            Pause writing for about 20 s and the changed paragraphs get up to 3 short hints. Max one review a minute and 20 an
+            hour. Every review is logged.
+          </Text>
+        )}
         <Button key="watch-toggle" label={watch.isOn ? 'Stop watching' : 'Start watching'} hotkey="w" onPress={props.onWatchToggle} />
         {watch.hints.length === 0 && <Text dimColor>No hints yet. Start with /cowrite:watch, then write.</Text>}
-        {watch.hints.map((hint, i) => (
-          <Text key={`hint-${i}`} dimColor={hint.ref !== latest?.ref}>
-            <Text weight="bold">{personaById(hint.persona)?.name ?? hint.persona}</Text> <Text dimColor>{hint.file}:{hint.line}</Text> {hint.text}
-          </Text>
-        ))}
-        {latest !== undefined && (
-          <Box flexDirection="row">
-            <Text dimColor>Latest hints: </Text>
-            {USES.map(use => (
-              <Button key={`live-${use}`} label={USE_LABELS[use].button} hotkey={USE_HOTKEY[use]} onPress={() => props.onAnnotate(latest.ref, use)} />
+        {reviews.map((group, g) => (
+          <Box key={`review-${group[0]!.ref}`} flexDirection="column">
+            {group.map((hint, i) => (
+              <Text key={`hint-${g}-${i}`} dimColor={g > 0}>
+                <Text weight="bold">{personaById(hint.persona)?.name ?? hint.persona}</Text> <Text dimColor>{hint.file}:{hint.line}</Text> {hint.text}
+              </Text>
             ))}
+            <Box flexDirection="row">
+              <Text dimColor>{g === 0 ? 'These hints: ' : `${localTime(group[0]!.ts)}: `}</Text>
+              {USES.map(use => (
+                <Button
+                  key={`live-${group[0]!.ref}-${use}`}
+                  label={USE_LABELS[use].button}
+                  hotkey={g === 0 ? USE_HOTKEY[use] : undefined}
+                  onPress={() => props.onAnnotate(group[0]!.ref, use)}
+                />
+              ))}
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
+  if (tab === 'feedback' && props.reading !== null) {
+    return (
+      <Box flexDirection="column">
+        {header}
+        {drawReading($, e, props.reading, props)}
+      </Box>
+    )
+  }
+
+  if (tab === 'feedback') {
+    const open = stats.open
+    const width = Math.max(24, columns - 30)
+    return (
+      <Box flexDirection="column">
+        {header}
+        {snapshot.nudge !== null && <Text color="warning">🛡 {snapshot.nudge}</Text>}
+        {open.length === 0 && <Text dimColor>Nothing open: every AI input is classified. Summon a persona from the Party tab, or ask Claude.</Text>}
+        {open.length > 0 && (
+          <Box flexDirection="column">
+            <Text weight="bold">Open one, read it, then say whether you used it in your own text</Text>
+            {open.map((turn, i) => (
+              <Button key={`open-${turn.id}`} plain hotkey={i === 0 ? 'o' : undefined} onPress={() => props.onOpen(turn.id)}>
+                <Text>
+                  • <Text weight="bold">{whoSaid(turn)}</Text>
+                  <Text dimColor>
+                    {' '}· {localTime(turn.ts)} · {turn.category}
+                    {turn.isAiText ? ' · [AI-TEXT]' : ''}
+                  </Text>{' '}
+                  {cut(turn.answer, width)}
+                </Text>
+              </Button>
+            ))}
+            {stats.unannotated > open.length && <Text dimColor>… and {stats.unannotated - open.length} more; the list shows the newest</Text>}
           </Box>
         )}
       </Box>
@@ -1240,31 +1316,21 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
       .sort((a, b) => b[1] - a[1])
       .map(([c, n]) => `${c} ${n}`)
       .join(' · ')
-    // the turns waiting on a card are not listed a second time below them
-    const cards = stats.open.slice(0, 3)
-    const recent = stats.recent.filter(r => !cards.some(c => c.id === r.id))
     return (
       <Box flexDirection="column">
         {header}
         <Text>
           AI turns: {stats.turns} (today {stats.today}) · unannotated:{' '}
           <Text color={stats.unannotated > 0 ? 'warning' : 'success'}>{stats.unannotated}</Text>
+          {stats.unannotated > 0 && <Text dimColor> (on the Feedback tab)</Text>}
         </Text>
         {categories !== '' && <Text dimColor>{categories}</Text>}
         {stats.aiText > 0 && (
           <Text color="error">⚠ {plural(stats.aiText, 'answer')} with AI-written text: disclose {stats.aiText === 1 ? 'it' : 'them'}.</Text>
         )}
-        {snapshot.nudge !== null && <Text color="warning">🛡 {snapshot.nudge}</Text>}
-        {cards.length > 0 && (
-          <Box flexDirection="column">
-            <Text weight="bold">To classify: did you use it in your own text?</Text>
-            <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
-            {cards.map((turn, i) => classifyCard($, e, turn, i === 0, props.onAnnotate, columns))}
-          </Box>
-        )}
-        {recent.length > 0 && <Text weight="bold">{cards.length > 0 ? 'Earlier' : 'Recent'}</Text>}
         {stats.recent.length === 0 && <Text dimColor>Nothing logged yet.</Text>}
-        {recent.map(r => (
+        {stats.recent.length > 0 && <Text weight="bold">Recent</Text>}
+        {stats.recent.map(r => (
           <Text key={`turn-${r.id}`} dimColor={!r.isOpen}>
             {r.isOpen ? '•' : '✓'} {localTime(r.ts)} [{r.category}]
             {r.isAiText ? ' [AI-TEXT]' : ''} {cut(r.preview, Math.max(30, columns - 24))}
@@ -1314,35 +1380,72 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
   const rows: Persona[][] = []
   for (let i = 0; i < props.personas.length; i += perRow) rows.push(props.personas.slice(i, i + perRow))
 
+  const name = (p: Persona) => (
+    <Button key={`summon-${p.id}`} plain onPress={() => props.onSummon(p.id)}>
+      <Text weight="bold">
+        {p.short}
+        {snapshot.briefed.includes(p.id) ? ' 📋' : ''}
+      </Text>
+    </Button>
+  )
+  const standing = (p: Persona) => {
+    const level = progress?.personaLevels[p.id] ?? 1
+    const consults = stats.personaConsults[p.id] ?? 0
+    const running = props.reviews.find(r => r.persona === p.id && !r.isDone)
+    return running !== undefined ? (
+      <Text color="warning">{reviewBar(running, 8)}</Text>
+    ) : (
+      <Text dimColor>
+        {props.isGame ? `Lv${level} · ` : ''}asked {consults}×
+      </Text>
+    )
+  }
+  // how many of this persona's inputs wait to be classified; a press opens the newest on the Feedback tab
+  const badge = (p: Persona) => {
+    const open = stats.openByPersona[p.id] ?? 0
+    if (open === 0) return null
+    return (
+      <Button key={`open-for-${p.id}`} plain onPress={() => props.onOpenFor(p.id)}>
+        <Text color="warning"> ✉ {open}</Text>
+      </Button>
+    )
+  }
+
+  if (isCompact) {
+    return (
+      <Box flexDirection="column">
+        {header}
+        {props.personas.map(p => (
+          <Box key={`card-${p.id}`} flexDirection="row">
+            {sprite($, e, p, SVG_SMALL)}
+            <Text> </Text>
+            {name(p)}
+            <Text dimColor> · </Text>
+            {standing(p)}
+            {badge(p)}
+          </Box>
+        ))}
+        <Text dimColor>click a name to summon · ✉ open feedback · 📋 briefed · /cowrite:party changes who is here · Esc back to prompt</Text>
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column">
       {header}
-      <Text dimColor>click a name to summon · 📋 briefed · /cowrite:party changes who is here</Text>
+      <Text dimColor>click a name to summon · ✉ open feedback · 📋 briefed · /cowrite:party changes who is here</Text>
       {rows.map((row, i) => (
         <Box key={`row-${i}`} flexDirection="row">
-          {row.map(p => {
-            const level = progress?.personaLevels[p.id] ?? 1
-            const consults = stats.personaConsults[p.id] ?? 0
-            const running = props.reviews.find(r => r.persona === p.id && !r.isDone)
-            return (
-              <Box key={`card-${p.id}`} flexDirection="column" width={CARD}>
+          {row.map(p => (
+            <Box key={`card-${p.id}`} flexDirection="column" width={CARD}>
+              <Box flexDirection="row">
                 {sprite($, e, p)}
-                <Button key={`summon-${p.id}`} plain onPress={() => props.onSummon(p.id)}>
-                  <Text weight="bold">
-                    {p.short}
-                    {snapshot.briefed.includes(p.id) ? ' 📋' : ''}
-                  </Text>
-                </Button>
-                {running !== undefined ? (
-                  <Text color="warning">{reviewBar(running, 8)}</Text>
-                ) : (
-                  <Text dimColor>
-                    {props.isGame ? `Lv${level} · ` : ''}asked {consults}×
-                  </Text>
-                )}
+                {badge(p)}
               </Box>
-            )
-          })}
+              {name(p)}
+              {standing(p)}
+            </Box>
+          ))}
         </Box>
       ))}
     </Box>
@@ -1457,29 +1560,65 @@ function drawScope($: Engine, e: RenderInput, scope: ScopeProgress | null, colum
 
 const whoSaid = (turn: RecentTurn) => (turn.persona !== undefined ? personaById(turn.persona)?.name ?? turn.persona : 'Claude')
 
-/** One AI input to classify: who said it, what you asked, what it said, and the four choices. */
-function classifyCard($: Engine, e: RenderInput, turn: RecentTurn, isFirst: boolean, onAnnotate: (ref: string, use: string) => void, columns: number) {
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const width = Math.max(20, columns - 14)
-  const asked = turn.origin === 'agent' ? `its report on your text` : `“${cut(turn.preview, width - 2)}”`
+/**
+ * One AI input opened whole: who said it, what you asked, what it said, a comment field, the four choices,
+ * and a button that asks the model what your manuscript's diff since then shows.
+ */
+function drawReading($: Engine, e: RenderInput, reading: Reading, props: PaneProps) {
+  const elements = $.ui.resolve(e)
+  const { Box, Text, Button } = elements
+  // a surface without a text field (none of the three here, but the table allows it) gets no comment
+  const Input = 'Input' in elements ? elements.Input : null
   return (
-    <Box key={`classify-${turn.id}`} flexDirection="column">
-      <Text>
-        <Text weight="bold">{whoSaid(turn)}</Text>{' '}
-        <Text dimColor>
-          · {localTime(turn.ts)} · {turn.category}
-          {isFirst ? ` · keys ${USES.map(use => USE_HOTKEY[use]).join(' ')}` : ''}
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        <Button key="reading-back" label="← Back" hotkey="b" onPress={props.onCloseReading} />
+        <Text>
+          {' '}
+          <Text weight="bold">{reading.who}</Text>
+          <Text dimColor>
+            {' '}· {localTime(reading.ts)} · {reading.category}
+          </Text>
         </Text>
-      </Text>
-      <Text dimColor>  you asked: {asked}</Text>
-      <Text>  it said: {cut(turn.answer || '(no text)', width * 2)}</Text>
+      </Box>
+      <Text dimColor>you asked: {reading.asked}</Text>
+      <Text>it said: {reading.text}</Text>
+      {reading.reply !== '' && <Text dimColor>Claude then said: {reading.reply}</Text>}
+      <Box flexDirection="row">
+        <Button
+          key="reading-summarize"
+          label={reading.isSummarizing ? 'Reading your diff…' : 'What did I change since?'}
+          hotkey="c"
+          onPress={props.onSummarize}
+        />
+      </Box>
+      {reading.summary !== '' && (
+        <Box flexDirection="column">
+          <Text>
+            <Text weight="bold">Since then, by the model's reading of your diff:</Text> {reading.summary}
+          </Text>
+          <Button key="reading-use-summary" label="Use as comment" hotkey="u" onPress={() => props.onNote(reading.summary, false)} />
+        </Box>
+      )}
+      {Input !== null && (
+        <Input
+          key={`note-${reading.id}`}
+          label="Comment"
+          placeholder="optional: what you did with it, for the prompts appendix"
+          value={reading.note}
+          rows={2}
+          onInput={(text: string) => props.onNote(text, true)}
+          onSubmit={(text: string) => props.onNote(text, true)}
+        />
+      )}
+      <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
       <Box flexDirection="row">
         {USES.map(use => (
           <Button
-            key={`use-${turn.id}-${use}`}
+            key={`use-${reading.id}-${use}`}
             label={USE_LABELS[use].button}
-            hotkey={isFirst ? USE_HOTKEY[use] : undefined}
-            onPress={() => onAnnotate(turn.id, use)}
+            hotkey={USE_HOTKEY[use]}
+            onPress={() => props.onAnnotate(reading.id, use, typedNote)}
           />
         ))}
       </Box>
@@ -1722,15 +1861,130 @@ async function focusMode($: Engine, cfg: Config): Promise<FocusMode> {
   return (await read($, focusAtom)) ?? cfg.focus
 }
 
-async function annotate($: Engine, cfg: Config, ref: string, use: string): Promise<void> {
+async function annotate($: Engine, cfg: Config, ref: string, use: string, note = ''): Promise<void> {
   const snapshot = await read($, snapshotAtom)
   if (snapshot.paper === null) return
   const root = snapshot.paper.root
+  const comment = note.trim()
   // the tool appends to the same file the hooks write: one writer at a time
   const ran = await withLog(root, () =>
-    $.process.run(['python3', `${$.plugin.root}/tools/ailog.py`, 'annotate', ref, '--use', use], { cwd: root }),
+    $.process.run(['python3', `${$.plugin.root}/tools/ailog.py`, 'annotate', ref, '--use', use, ...(comment === '' ? [] : ['--note', comment])], { cwd: root }),
   )
   $.ui.toast(ran.exitCode === 0 ? `Annotated as ${use}` : `Annotation failed: ${ran.stderr.slice(0, 80)}`)
+  if (ran.exitCode === 0) {
+    // a classified review's hints leave the Live tab and the band; the opened turn closes
+    await update($, watchAtom, s => (s.hints.some(h => h.ref === ref) ? { ...s, hints: s.hints.filter(h => h.ref !== ref) } : s))
+    await update($, readingAtom, s => (s.open?.id === ref ? NO_READING : s))
+    if ((await read($, readingAtom)).open === null) typedNote = ''
+  }
+  await refresh($, cfg)
+}
+
+// ===== reading one AI input whole =====
+
+const NO_READING: ReadingState = { open: null }
+const readingAtom = atom({ plugin: 'cowrite', key: 'reading' } as const, NO_READING, { shape: 'reading-1' })
+// What the comment field holds as typed: kept outside the atom so a keystroke redraws nothing.
+let typedNote = ''
+
+/** Opens a logged turn on the Log tab: the whole answer, as a person reads it. */
+async function openTurn($: Engine, id: string): Promise<void> {
+  const snapshot = await read($, snapshotAtom)
+  if (snapshot.paper === null) return
+  const entries = await readLog($, snapshot.paper.root)
+  const prompt = entries.find(e => e.type === 'prompt' && e.id === id)
+  const response = entries.find(e => e.type === 'response' && e.ref === id)
+  if (prompt?.type !== 'prompt' || response?.type !== 'response') return
+  const turn = snapshot.stats.open.find(t => t.id === id) ?? snapshot.stats.recent.find(t => t.id === id)
+  const persona = prompt.agent ?? response.personas[0]
+  const isReport = prompt.origin === 'agent'
+  typedNote = ''
+  const open: Reading = {
+    id,
+    ts: prompt.ts,
+    category: turn?.category ?? prompt.category,
+    who: persona !== undefined ? personaById(persona)?.name ?? persona : 'Claude',
+    asked: isReport ? 'its report on your text' : readable(prompt.text) || '(no text)',
+    text: (isReport ? readable(prompt.text) : readable(response.answer)) || '(no text)',
+    reply: isReport ? readable(response.answer) : '',
+    note: '',
+    summary: '',
+    isSummarizing: false,
+  }
+  await update($, readingAtom, () => ({ open }))
+}
+
+/** The badge on a persona's card: the Feedback tab, opened on that persona's newest open input. */
+async function openFor($: Engine, personaId: string): Promise<void> {
+  await update($, tabAtom, () => 'feedback')
+  const { stats } = await read($, snapshotAtom)
+  const turn = stats.open.find(t => t.persona === personaId)
+  if (turn !== undefined) await openTurn($, turn.id)
+}
+
+/** The comment: typed into the field, or taken from the summary (then the field is redrawn with it). */
+async function setNote($: Engine, text: string, isTyped: boolean): Promise<void> {
+  typedNote = text
+  if (!isTyped) await update($, readingAtom, s => (s.open === null ? s : { open: { ...s.open, note: text } }))
+}
+
+/**
+ * What the manuscript's diff since the opened turn shows, in the model's words: from the autosave commit
+ * before the turn to the working tree. Logged like any AI input; it describes, the author classifies.
+ */
+async function summarizeChanges($: Engine, cfg: Config): Promise<void> {
+  const reading = (await read($, readingAtom)).open
+  const snapshot = await read($, snapshotAtom)
+  if (reading === null || reading.isSummarizing || snapshot.paper === null) return
+  const paper = snapshot.paper
+  const setSummary = async (summary: string, isSummarizing = false): Promise<void> => {
+    await update($, readingAtom, s => (s.open === null || s.open.id !== reading.id ? s : { open: { ...s.open, summary, isSummarizing } }))
+  }
+  await setSummary('', true)
+  const before = await git($, paper, ['log', '-1', '--format=%H', `--before=${reading.ts}`, '--', 'manuscript'])
+  const sha = before.stdout.trim()
+  if (before.exitCode !== 0 || sha === '') {
+    return setSummary('No saved version of the manuscript from before this feedback: autosave was off, or nothing had been committed yet.')
+  }
+  const diff = await git($, paper, ['diff', sha, '--', 'manuscript'])
+  if (diff.exitCode !== 0) return setSummary(`git diff failed: ${diff.stderr.trim().slice(0, 100)}`)
+  if (diff.stdout.trim() === '') return setSummary('The manuscript has not changed since this feedback.')
+  const model = cfg.watchModel
+  const answer = await $.model
+    .complete({
+      model,
+      system: changeSummarySystem(paper.language),
+      prompt: changeSummaryPrompt(reading.text, cutDiff(diff.stdout)),
+      maxTokens: 400,
+      effort: 'low',
+      timeoutMs: 60_000,
+    })
+    .catch(() => null)
+  if (answer === null || !answer.isAnswered) return setSummary('The summary failed; try again later.')
+  const summary = answer.text.trim() || '(no text)'
+  const id = newId()
+  const ts = new Date(await $.clock.now()).toISOString()
+  await appendLog($, paper.root, {
+    type: 'prompt',
+    id,
+    ts,
+    session: await $.session.id(),
+    paper: paper.name,
+    category: 'change-summary',
+    origin: 'summary',
+    text: `Change summary: what the manuscript's diff since ${localTime(reading.ts)} (${reading.who}'s input ${reading.id}) shows, ${diff.stdout.length} characters of diff`,
+  })
+  await appendLog($, paper.root, {
+    type: 'response',
+    ref: id,
+    ts,
+    model,
+    personas: [],
+    tools_used: ['git diff'],
+    ai_text_flag: false,
+    answer: summary,
+  })
+  await setSummary(summary)
   await refresh($, cfg)
 }
 
@@ -1980,12 +2234,12 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'cowrite:pane' }, async ($, e) => {
     const wanted = e.args.trim().toLowerCase()
-    const tab = (['party', 'live', 'log', 'scope', 'progress'] as const).find(t => t === wanted)
-    if (wanted !== '' && tab === undefined) return { text: 'Usage: /cowrite:pane [party|live|log|scope|progress]' }
+    const tab = (['party', 'feedback', 'live', 'log', 'scope', 'progress'] as const).find(t => t === wanted)
+    if (wanted !== '' && tab === undefined) return { text: 'Usage: /cowrite:pane [party|feedback|live|log|scope|progress]' }
     if (tab !== undefined) await update($, tabAtom, () => tab)
     await refresh($, cfg)
     await $.ui.open({ id: PANE, title: 'CoWriting', focus: true, backgroundColor: 'transparent' })
-    return { text: `CoWriting pane${tab ? ` · ${tab}` : ''} · keys 1–4 tabs, r refresh, Esc back` }
+    return { text: `CoWriting pane${tab ? ` · ${tab}` : ''} · number keys switch tabs, r refresh, Esc back` }
   }).catch(commandFailed)
 
   on('command.run', { command: 'cowrite:paper' }, async ($, e) => {
@@ -2409,19 +2663,27 @@ export const register: Register = (on, options) => {
     const watch = await read($, watchAtom)
     const reviews = await read($, reviewsAtom)
     const usage = await read($, usageAtom)
+    const reading = (await read($, readingAtom)).open
     return drawPane($, e, {
       usage: usageParts(usage, cfg.meter, watch.tokens ?? 0),
       reviews: Object.values(reviews),
       columns: e.props.bodyColumns,
+      placement: e.props.placement,
       snapshot,
       tab,
       watch,
+      reading,
+      onOpen: id => void openTurn($, id),
+      onOpenFor: id => void openFor($, id),
+      onCloseReading: () => void update($, readingAtom, () => NO_READING),
+      onSummarize: () => void summarizeChanges($, cfg),
+      onNote: (text, isTyped) => void setNote($, text, isTyped),
       onWatchToggle: () => void setWatching($, cfg, !watch.isOn),
       personas: partyPersonas(snapshot.paper?.party ?? []),
       isGame,
       onTab: tab => void update($, tabAtom, () => tab),
       onSummon: id => void summon($, cfg, id, ''),
-      onAnnotate: (ref, use) => void annotate($, cfg, ref, use),
+      onAnnotate: (ref, use, note) => void annotate($, cfg, ref, use, note),
       onRefresh: () => void refresh($, cfg),
       onScopeCheck: () => void scopeCommand($, cfg, 'check').then(text => $.ui.toast(text)),
       onScopeEdit: () => void scopeCommand($, cfg, 'edit'),
@@ -2432,7 +2694,10 @@ export const register: Register = (on, options) => {
     const snapshot = await read($, snapshotAtom)
     const isHidden = await read($, bandHiddenAtom)
     const watch = await read($, watchAtom)
-    if (!e.props.hasSurvey && watch.isOn && !watch.isHidden && watch.hints.length > 0) {
+    // while the pane shows the Live tab the hints are already on screen with their buttons: no second copy
+    const panes = await $.ui.panes().catch(() => [])
+    const isLiveShown = panes.some(p => p.id === PANE && p.isPlaced && p.isShown) && (await read($, tabAtom)) === 'live'
+    if (!e.props.hasSurvey && watch.isOn && !watch.isHidden && watch.hints.length > 0 && !isLiveShown) {
       return drawLiveBand($, e, {
         watch,
         onAnnotate: (ref, use) => void annotate($, cfg, ref, use),

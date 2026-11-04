@@ -18,7 +18,7 @@ CoWriting turns these rules into features:
 | You are the author | `manuscript/` is **read-only for Claude**, and so is every other file of yours in the paper: Claude writes only in `notes/ai/`, the log, the plan and the disclosure. A hook refuses the edits it can recognise, including from subagents and shell commands, the workspace's deny rules and sandbox refuse what the hook cannot see, and every change to your files detected during a tool call is recorded anyway (see [The manuscript guard](#the-manuscript-guard)). |
 | Transparency | Every prompt and answer is logged automatically to `ai-log/` (append-only, timestamped, with the model and plugin versions). |
 | Disclosure | `/cowrite:disclosure` turns the log into an **AI register** (EN/DE, Markdown/LaTeX) for your declaration of authorship or your journal, and into a prompts appendix where one is required. |
-| Responsibility | You classify each AI input: **✓ used** (adopted), **✎ changed** (adapted), **✗ not used** (rejected) or **ℹ info**. The card shows who said it, what you asked and what it said. Claude never decides this for you. |
+| Responsibility | You classify each AI input: **✓ used** (adopted), **✎ changed** (adapted), **✗ not used** (rejected) or **ℹ info**. The pane lists what is open; you open one, read it whole, add a comment if you like, and decide. On request the model describes what your manuscript's diff shows since that input, but it never decides for you. |
 | No fabricated sources | References need a verified DOI or a citekey from your reference manager's export. `verify_refs.py` checks your bibliography (`.bib`, CSL JSON, RIS, PubMed) against Crossref. |
 
 The background research and requirements are in [docs/research-and-requirements.md](docs/research-and-requirements.md). How each feature maps to the DFG principles is in [docs/gwp-rationale.md](docs/gwp-rationale.md).
@@ -146,7 +146,7 @@ The CoWriting pane works in the terminal, in the VS Code extension and in the de
 
 | Command | What it does |
 |---|---|
-| `/cowrite:pane [party\|live\|log\|scope\|progress]` | Opens the **CoWriting pane** (on that tab) with the keyboard in it. Click a persona's name to summon it. `1`–`5` switch tabs, `w` turns live review on or off, `r` refreshes, `a`/`d`/`x`/`i` annotate the latest open turn as adopted/adapted/rejected/info, `Esc` goes back to the prompt |
+| `/cowrite:pane [party\|feedback\|live\|log\|scope\|progress]` | Opens the **CoWriting pane** (on that tab) with the keyboard in it. Click a persona's name to summon it, or its ✉ badge to read what it said. The number keys switch tabs, `w` turns live review on or off, `r` refreshes, `o` opens the newest unclassified input on the Feedback tab, `a`/`d`/`x`/`i` classify it as adopted/adapted/rejected/info, `Esc` goes back to the prompt |
 | `/cowrite:watch [on\|off] [persona …\|all]` | **Live review** while you write (see below). Default watchers: Grammar Guy, Terminologist, Style Coach, Architect |
 | `/cowrite:ask <persona> <question>` | Talk to one persona directly, e.g. `/cowrite:ask terminologist is "sleep architecture" the usual term?` |
 | `/cowrite:brief [persona\|all] [text]` | Tell a persona what to look for **in this project**. Without text it interviews you and saves your answers; with text it saves them directly. Without arguments it lists all briefs. |
@@ -168,12 +168,18 @@ The CoWriting pane works in the terminal, in the VS Code extension and in the de
 
 The status line shows `✍ <paper> · assist-only · Lv3 · 2 to classify · ctx 42% · 5h 63%`. The pane opens with a transparent background, so it blends with your terminal (set your terminal profile to black for the dark look). When AI inputs pile up unclassified, or an answer contains AI-written text, a band above the prompt reminds you.
 
+### Reading and classifying feedback
+
+The pane's **Feedback** tab lists every AI input you still owe a classification: who said it, when, and its first words; the tab's label counts them, and each persona's card on the Party tab wears a ✉ badge with its own count, which opens the newest. Open one and you get the whole text (for a persona's report, the report itself), a comment field, and the four choices. The comment goes into the log entry and from there into the prompts appendix, next to its turn.
+
+**What did I change since?** asks the model what your manuscript's diff shows between that input and now: it takes the autosave commit from just before the input, diffs it to your working copy, and answers in three sentences at most, with the live-review model. It describes, it doesn't judge or classify; you can take the description as your comment, edit it, or ignore it. The call is logged like any AI input, under its own category, and needs no classification of its own. It needs autosave (or your own commits): without a saved version from before the input there is nothing to compare.
+
 ### Live review
 
 `/cowrite:watch` turns on a reviewer that looks over your shoulder:
 - **When it looks:** when you pause writing for about 20 seconds.
 - **What it sends:** only the paragraphs you just changed, to a small, fast model (option *Live review model*, default `haiku`).
-- **What you get back:** at most 3 short hints, each about one line, from the watching personas. They appear above the prompt and in the pane's **Live** tab.
+- **What you get back:** at most 3 short hints, each about one line, from the watching personas. They appear above the prompt and in the pane's **Live** tab; while the Live tab is on screen the band stays out of the way. Each review has its own four buttons, and a classified review's hints leave both places.
 - **The rules stay the same:** no rewritten sentences. Grammar Guy may give a corrected word, and the Terminologist may name the usual term.
 - **Limits:** at most one review a minute and 20 an hour.
 - **Logging:** every review is logged, so it shows up in your disclosure.

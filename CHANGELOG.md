@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3 (2026-11-04)
+
+- A **Feedback** tab of its own lists the AI inputs still to classify, with their count in its label, and each persona's card on the Party tab wears a ✉ badge with that persona's count; pressing it opens the newest. Opening an input shows the whole text (for a persona's report, the report itself, then what Claude added), a comment field and the four choices. The comment goes into the annotation and into the prompts appendix under its turn. Before, the Log tab held cards that cut the answer after two lines; the Log tab is the history again.
+- **What did I change since?** on an opened input: the plugin takes the autosave commit from before that input, diffs the manuscript to the working copy, and the live-review model describes in three sentences what changed in relation to the feedback. The description can seed the comment. It is logged with origin `summary` under the category `change-summary`, disclosed, and not owed a classification. Without a saved version from before the input it says so instead.
+- Live hints: classifying a review takes its hints off the Live tab and the band, each review has its own four buttons (before, only the latest had them and the rest stayed dimmed for good), and the band draws nothing while the pane shows the Live tab, which had the same hints twice in VS Code.
+- In VS Code the pane sits inline above the prompt and shares the panel with the transcript, where the grid of sprite cards took most of the height and wrapped into two rows. Seated inline on a graphical surface, the Party tab is now a short list: a small sprite, the name and the standing on one line per persona, and the help lines folded into one. The terminal and the dock keep the grid.
+
 ## 0.3.2 (2026-11-04)
 
 - Every release now has `cowrite.zip` attached: the plugin folder, zipped as `cowrite/`, built by a workflow when a `v<version>` tag is pushed. The newest one is always at https://github.com/dozwa/claude-cowriting/releases/latest/download/cowrite.zip. Upload it under Customize > Plugins in the Claude desktop app, or try it for one session with `claude --plugin-dir cowrite.zip`.

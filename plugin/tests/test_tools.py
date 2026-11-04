@@ -199,6 +199,11 @@ class PaperWorkspace(unittest.TestCase):
             self.assertEqual(len(october), len(FIXTURE), "the fixture's month is untouched")
         self.assertEqual(json.loads(lines[-1])["note"], "kept my spelling")
         self.assertIn("unannotated: 0", run("ailog.py", "stats", cwd=self.root).stdout)
+        # the note reaches the prompts appendix, under its turn
+        self.assertEqual(run("ailog.py", "prompts", "--lang", "en", "--format", "md", cwd=self.root).returncode, 0)
+        self.assertIn("*Comment:* kept my spelling", self.read("ai-prompts.en.md"))
+        self.assertEqual(run("ailog.py", "prompts", "--lang", "en", "--format", "tex", cwd=self.root).returncode, 0)
+        self.assertIn("\\textit{Comment:} kept my spelling", self.read("ai-prompts.en.tex"))
         ambiguous = run("ailog.py", "annotate", "a", "--use", "info", cwd=self.root)
         self.assertNotEqual(ambiguous.returncode, 0)
 

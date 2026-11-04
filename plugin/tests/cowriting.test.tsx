@@ -532,6 +532,10 @@ test('/cowrite:watch reviews after a writing pause, logs it, and shows the hints
     }
   })
   const clock = mock.clock(on, { now: 1_000_000 })
+  let isPaneShown = false
+  on('ui.panes', () => ({ value: isPaneShown ? [{ id: 'cowriting', title: 'CoWriting', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'Annotated.', stderr: '' } as never }))
+  on('ui.render', () => ({ type: 'Text', children: ['(the engine’s own band)'] }) as never) // drawn when the plugin draws none
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const presentation = { isFullscreen: false, columns: 100 } as never
 
@@ -552,14 +556,27 @@ test('/cowrite:watch reviews after a writing pause, logs it, and shows the hints
   expect(entries.some(e => e.type === 'prompt' && e.origin === 'watch')).toBe(true)
   expect(computeStats(entries, new Date()).unannotated).toBe(0) // live hints don't nag
 
-  const ui = await $.ui.mount({
-    plugin: 'cowrite',
-    component: 'AbovePrompt',
-    surface: 'terminal',
-    props: { hasSurvey: false } as never,
-  })
+  const band = { plugin: 'cowrite', component: 'AbovePrompt', surface: 'terminal', props: { hasSurvey: false } as never } as const
+  const ui = await $.ui.mount(band)
   expect(await ui.find({ type: 'Text', text: /subjects → participants/ })).toBeDefined()
   await ui.unmount()
+
+  // while the pane shows the Live tab the hints are on screen with their buttons: the band draws no copy
+  isPaneShown = true
+  await $.command.run({ command: 'cowrite:pane', args: 'live', origin: { kind: 'composer' }, presentation })
+  const quiet = await $.ui.mount(band)
+  expect(await quiet.find({ type: 'Text', text: /subjects → participants/ })).toBeUndefined()
+  await quiet.unmount()
+  await $.command.run({ command: 'cowrite:pane', args: 'party', origin: { kind: 'composer' }, presentation })
+
+  // classifying a review takes its hints off the band and the Live tab
+  const again = await $.ui.mount(band)
+  expect(await again.find({ type: 'Text', text: /subjects → participants/ })).toBeDefined()
+  await again.press({ key: 'band-live-adopted' })
+  await again.unmount()
+  const after = await $.ui.mount(band)
+  expect(await after.find({ type: 'Text', text: /subjects → participants/ })).toBeUndefined()
+  await after.unmount()
 
   const stopped = await $.command.run({ command: 'cowrite:watch', args: 'off', origin: { kind: 'composer' }, presentation })
   expect(stopped.text).toContain('stopped')
@@ -609,6 +626,32 @@ test('summoning from the pane counts the persona on its card', async ($, on) => 
   await again.unmount()
 })
 
+test('inline above the prompt the party is a short list with small sprites; the dock keeps the grid', async ($, on) => {
+  workspace(on, paperFiles())
+  await $.session.start({ cwd: ROOT, surface: 'vscode', isInteractive: true })
+  const pane = (placement: 'dock' | 'inline') =>
+    ({
+      plugin: 'cowrite',
+      component: 'Pane',
+      requestId: 'cowriting',
+      surface: 'vscode',
+      props: { title: 'CoWriting', isFocused: false, bodyColumns: 90, placement, scroll: { offset: 0, bodyRows: 14 }, view: {} },
+    }) as const
+
+  const inline = await $.ui.mount(pane('inline'))
+  expect((await inline.find({ type: 'Svg' }))?.props.width).toBe(22)
+  expect(await inline.find({ type: 'Text', text: /^Esc back to prompt$/ })).toBeUndefined()
+  expect(await inline.find({ type: 'Text', text: /click a name to summon .* Esc back to prompt/ })).toBeDefined()
+  expect(await inline.find({ key: 'summon-architect' })).toBeDefined()
+  await inline.unmount()
+
+  const dock = await $.ui.mount(pane('dock'))
+  expect((await dock.find({ type: 'Svg' }))?.props.width).toBe(44)
+  expect(await dock.find({ type: 'Text', text: /^Esc back to prompt$/ })).toBeDefined()
+  expect(await dock.find({ key: 'row-0' })).toBeDefined()
+  await dock.unmount()
+})
+
 test('the usage meter shows tokens and limits, and warns once a window crosses 80 %', async () => {
   const usage = toUsage({
     context: { tokens: 84_000, percent: 42 },
@@ -654,17 +697,32 @@ test('calm shows Claude Code steps as one line, focus hides them, /cowrite:quiet
   await focus.unmount()
 })
 
-test('the Log tab says who said what, before you classify it', async ($, on) => {
+test('the Feedback tab and the persona badge lead to the whole input, a comment, the diff summary and the choices', async ($, on) => {
   const files = paperFiles()
   const log = [
     { type: 'prompt', id: 'p1', ts: '2026-10-29T08:00:00Z', session: 's', paper: 'demo', category: 'structure', command: 'summon', text: 'Use the cowrite:architect agent to review x.' },
     { type: 'response', ref: 'p1', ts: '2026-10-29T08:00:05Z', model: 'm', personas: ['architect'], agents: { a1: 'architect' }, tools_used: [], ai_text_flag: false, answer: 'The Architect is on it.' },
-    { type: 'prompt', id: 'p2', ts: '2026-10-29T08:02:00Z', session: 's', paper: 'demo', category: 'structure', origin: 'agent', agent: 'architect', text: '<agent-message from="a1">…</agent-message>' },
+    { type: 'prompt', id: 'p2', ts: '2026-10-29T08:02:00Z', session: 's', paper: 'demo', category: 'structure', origin: 'agent', agent: 'architect', text: '<agent-message from="a1">\n[Subagent hand-back] The text below is the final report.\nThe red thread breaks after the gap: the method comes first.\n</agent-message>' },
     { type: 'response', ref: 'p2', ts: '2026-10-29T08:02:09Z', model: 'm', personas: ['architect'], tools_used: [], ai_text_flag: false, answer: '**Top issue:** the red thread breaks at l. 12 — why does the method come before the gap?' },
   ]
   files.set(`${ROOT}/ai-log/2026-10.jsonl`, log.map(e => JSON.stringify(e)).join('\n'))
   workspace(on, files)
+  const runs: (readonly string[])[] = []
+  on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
+    runs.push(e.argv)
+    const [cmd, sub] = e.argv
+    if (cmd === 'git' && sub === 'log') return { value: { exitCode: 0, stdout: 'abc123\n', stderr: '' } as never }
+    if (cmd === 'git' && sub === 'diff') {
+      return { value: { exitCode: 0, stdout: '--- a/manuscript/main.tex\n+++ b/manuscript/main.tex\n-Die Methode.\n+Die Lücke. Dann die Methode.\n', stderr: '' } as never }
+    }
+    return { value: { exitCode: 0, stdout: 'Annotated p2 as adapted.\n', stderr: '' } as never }
+  })
+  on('model.complete', () => ({
+    value: { isAnswered: true as const, text: 'Der Absatz zur Lücke steht jetzt vor der Methode.', usage: {} as never },
+  }))
+  mock.clock(on, { now: 1_000_000 })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const logOf = () => [...files.entries()].filter(([k]) => k.startsWith(`${ROOT}/ai-log/`)).flatMap(([, v]) => parseLog(v))
 
   const stats = computeStats(parseLog(files.get(`${ROOT}/ai-log/2026-10.jsonl`)!), new Date())
   expect(stats.unannotated).toBe(1) // the launch turn has nothing to classify; the report does
@@ -677,9 +735,36 @@ test('the Log tab says who said what, before you classify it', async ($, on) => 
     surface: 'terminal',
     props: { title: 'CoWriting', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
   })
-  await ui.press({ key: 'tab-log' })
-  expect(await ui.find({ type: 'Text', text: /it said: Top issue: the red thread breaks/ })).toBeDefined()
+  // the Party tab counts the Architect's open input on its card; the badge leads to it
+  expect(await ui.find({ key: 'open-for-architect' })).toBeDefined()
+  expect(await ui.find({ key: 'open-for-grammar-guy' })).toBeUndefined()
+  await ui.press({ key: 'open-for-architect' })
+  expect(await ui.find({ key: 'reading-back' })).toBeDefined()
+  await ui.press({ key: 'reading-back' })
+  // the Feedback tab's list names the turn; the whole text, the comment and the choices wait behind it
+  expect(await ui.find({ key: 'tab-feedback' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Top issue: the red thread breaks/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ used = as suggested/ })).toBeUndefined()
+  await ui.press({ key: 'open-p2' })
+  expect(await ui.find({ type: 'Text', text: /it said: The red thread breaks after the gap/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Claude then said: .*Top issue/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /✓ used = as suggested/ })).toBeDefined()
+
+  // what changed since: the autosave commit before the turn, diffed to now, read by the model, and logged
+  await ui.press({ key: 'reading-summarize' })
+  expect(runs.some(argv => argv[0] === 'git' && argv[1] === 'log' && argv.includes('--before=2026-10-29T08:02:00Z'))).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /Der Absatz zur Lücke steht jetzt vor der Methode/ })).toBeDefined()
+  expect(logOf().filter(e => e.type === 'prompt' && e.origin === 'summary').length).toBe(1)
+  expect(computeStats(logOf(), new Date()).unannotated).toBe(1) // the summary is AI input, but not one the author owes a classification
+
+  // the summary can seed the comment; what the author types is what the annotation takes
+  await ui.press({ key: 'reading-use-summary' })
+  expect((await ui.find({ key: 'note-p2' }))?.props.value).toContain('Der Absatz zur Lücke')
+  await ui.input({ key: 'note-p2', text: 'Reihenfolge getauscht, Begründung ergänzt', kind: 'change' })
+  await ui.press({ key: 'use-p2-adapted' })
+  const annotated = runs.find(argv => argv.includes('annotate'))!
+  expect(annotated.slice(-4)).toEqual(['--use', 'adapted', '--note', 'Reihenfolge getauscht, Begründung ergänzt'])
+  expect(await ui.find({ key: 'reading-back' })).toBeUndefined()
   await ui.unmount()
 })
 

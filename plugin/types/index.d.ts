@@ -11,9 +11,10 @@ export type PromptEntry = {
   /**
    * 'agent': not typed by the author but a subagent's report handed back to the session;
    * 'watch': a live review the plugin started while the author wrote;
-   * 'scope': a check of which planned points the text already makes
+   * 'scope': a check of which planned points the text already makes;
+   * 'summary': a description of what the manuscript's diff shows since a piece of feedback
    */
-  origin?: 'agent' | 'watch' | 'scope'
+  origin?: 'agent' | 'watch' | 'scope' | 'summary'
   /** for origin 'agent': the persona whose report this is */
   agent?: string
   text: string
@@ -78,12 +79,37 @@ export type RecentTurn = {
   answer: string
   /** who it came from: the persona, if any */
   persona?: string
-  origin?: 'agent' | 'watch' | 'scope'
+  origin?: 'agent' | 'watch' | 'scope' | 'summary'
   personas: string[]
   isAnnotated: boolean
   /** waits for the author to classify it: not a live hint, not a mere launch of a reviewer */
   isOpen: boolean
   isAiText: boolean
+}
+
+/** One AI input opened in the pane to read whole, comment on and classify. */
+export type Reading = {
+  id: string
+  ts: string
+  category: string
+  /** who said it: the persona, or Claude */
+  who: string
+  /** what the author asked, or what the turn was */
+  asked: string
+  /** the whole answer, readable; for a persona's report, the report itself */
+  text: string
+  /** what Claude added after a persona's report; '' otherwise */
+  reply: string
+  /** the comment the field shows; typing replaces it until another is drawn */
+  note: string
+  /** what the model read in the manuscript's diff since this turn; '' until asked */
+  summary: string
+  isSummarizing: boolean
+}
+
+/** The Log tab's state: the AI input opened whole, or null for the list. */
+export type ReadingState = {
+  open: Reading | null
 }
 
 export type Stats = {
@@ -102,6 +128,8 @@ export type Stats = {
   recent: RecentTurn[]
   /** turns waiting to be classified, newest first (at most 5) */
   open: RecentTurn[]
+  /** how many turns each persona has waiting to be classified, all of them */
+  openByPersona: Record<string, number>
 }
 
 export type GameFile = {
@@ -202,7 +230,7 @@ export type ScopeProgress = {
   overall: number
 }
 
-export type Tab = 'party' | 'live' | 'log' | 'scope' | 'progress'
+export type Tab = 'party' | 'feedback' | 'live' | 'log' | 'scope' | 'progress'
 
 export type LiveHint = {
   /** the log turn of the review that gave it */
@@ -261,6 +289,7 @@ declare module 'claude-code' {
       usage: Shaped<Usage>
       /** a paper folder opened with /cowrite:paper <path>; null: the session's folder decides */
       paperRoot: string | null
+      reading: Shaped<ReadingState>
     }
   }
 }

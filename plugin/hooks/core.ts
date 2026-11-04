@@ -92,6 +92,7 @@ export const EMPTY_STATS: Stats = {
   guardEvents: 0,
   recent: [],
   open: [],
+  openByPersona: {},
 }
 
 /** The subagent id a hand-back prompt reports for, from `<agent-message from="…">`. */
@@ -114,6 +115,29 @@ const flatten = (s: string) =>
     .replace(/[#*_`>|]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+/** The whole text as a person reads it in the pane: the hand-back frame and tags out, paragraphs kept. */
+export const readable = (s: string) =>
+  s
+    .replace(/^\s*\[Subagent hand-back\][^\n]*\n?/gm, '')
+    .replace(/<\/?agent-message[^>]*>/g, '')
+    .replace(/<[^>\n]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+// ---------------------------------------------- what changed since a hint
+/** Longer diffs are cut: the summary describes the gist, not every line. */
+export const SUMMARY_DIFF_MAX = 12_000
+export const cutDiff = (diff: string) => (diff.length <= SUMMARY_DIFF_MAX ? diff : `${diff.slice(0, SUMMARY_DIFF_MAX)}\n[… diff cut after ${SUMMARY_DIFF_MAX} characters]`)
+export const changeSummarySystem = (language: string) =>
+  [
+    'You describe, for the author of an academic manuscript, what changed in their text since a piece of feedback they received.',
+    'You get the feedback and a unified diff of the manuscript from that moment to now.',
+    `Answer in ${language === 'de' ? 'German' : 'English'}, in at most three sentences of plain text.`,
+    'Say what changed and whether the changes relate to the feedback. Describe only: do not judge the text, do not say whether the feedback was right, do not classify what the author did, and do not propose wording.',
+    'If nothing in the diff relates to the feedback, say so in one sentence.',
+  ].join(' ')
+export const changeSummaryPrompt = (feedback: string, diff: string) => `Feedback:\n${feedback}\n\nDiff of the manuscript since then:\n${diff}`
 
 /** What the four classifications mean, in the words the buttons and the legend use. */
 export const USE_LABELS = {
@@ -151,7 +175,7 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
   }
 
   const day = now.toISOString().slice(0, 10)
-  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [], guardEvents }
+  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [], openByPersona: {}, guardEvents }
   const turns: RecentTurn[] = []
 
   for (const [id, p] of prompts) {
@@ -166,8 +190,12 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
     // Live hints come in a steady stream, and a turn that only launched a reviewer has nothing to
     // classify: its report does. Classifying those is welcome, not owed.
     const isLaunchOnly = r.agents !== undefined && Object.keys(r.agents).length > 0
-    const isOpen = a === undefined && p.origin !== 'watch' && p.origin !== 'scope' && !isLaunchOnly
-    if (isOpen) stats.unannotated += 1
+    const isOpen = a === undefined && p.origin !== 'watch' && p.origin !== 'scope' && p.origin !== 'summary' && !isLaunchOnly
+    if (isOpen) {
+      stats.unannotated += 1
+      const who = p.agent ?? r.personas[0]
+      if (who !== undefined) stats.openByPersona[who] = (stats.openByPersona[who] ?? 0) + 1
+    }
     if (r.ai_text_flag) stats.aiText += 1
     for (const persona of r.personas) {
       // a consult is counted when the persona is launched; its hand-back only carries the annotation,

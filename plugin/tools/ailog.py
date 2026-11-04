@@ -26,7 +26,7 @@ USES = ("adopted", "adapted", "rejected", "info")
 
 # Turns the plugin starts on its own, by origin: they are AI input and are disclosed,
 # but the author owes them no classification (the pane does not count them as open).
-AUTO_ORIGINS = {"watch": "live-review", "scope": "scope-check"}
+AUTO_ORIGINS = {"watch": "live-review", "scope": "scope-check", "summary": "change-summary"}
 
 CATEGORY_LABELS = {
     "en": {
@@ -43,6 +43,7 @@ CATEGORY_LABELS = {
         "general": "General questions",
         "live-review": "Live review while writing (short hints on changed paragraphs)",
         "scope-check": "Check of the planned points against the text",
+        "change-summary": "Description of what the manuscript's diff shows since a piece of feedback (the author classifies)",
     },
     "de": {
         "literature": "Literaturrecherche und Quellenprüfung",
@@ -58,6 +59,7 @@ CATEGORY_LABELS = {
         "general": "Allgemeine Fragen",
         "live-review": "Live-Review beim Schreiben (kurze Hinweise zu geänderten Absätzen)",
         "scope-check": "Abgleich der geplanten Punkte mit dem Text",
+        "change-summary": "Beschreibung, was der Diff des Manuskripts seit einem Hinweis zeigt (die Einordnung trifft die Autorin bzw. der Autor)",
     },
 }
 
@@ -364,6 +366,7 @@ def cmd_prompts(root: Path, args) -> None:
         "Live reviews and checks the plugin started on its own are marked as such."
     )
     answer_head = "Antwort" if de else "Answer"
+    note_head = "Kommentar" if de else "Comment"
 
     def heading(t: dict) -> str:
         p, a = t["prompt"], t["annotation"]
@@ -382,6 +385,8 @@ def cmd_prompts(root: Path, args) -> None:
             if args.answers:
                 out += [f"**{answer_head} ({t['response'].get('model', '?')}):**", ""]
                 out += ["> " + line for line in (t["response"].get("answer", "").strip() or "–").splitlines()] + [""]
+            if t["annotation"] and t["annotation"].get("note"):
+                out += [f"*{note_head}:* {t['annotation']['note']}", ""]
     else:
         e = tex_escape
         out = [f"\\section*{{{e(title)}}}", "", e(intro), "", "\\begin{enumerate}"]
@@ -390,6 +395,8 @@ def cmd_prompts(root: Path, args) -> None:
             out.append("  " + e(squash(t["prompt"].get("text", "")) or "–"))
             if args.answers:
                 out.append(f"  \\\\ \\textit{{{e(answer_head)} ({e(t['response'].get('model', '?'))}):}} {e(squash(t['response'].get('answer', '')))}")
+            if t["annotation"] and t["annotation"].get("note"):
+                out.append(f"  \\\\ \\textit{{{e(note_head)}:}} {e(squash(t['annotation']['note']))}")
         out += ["\\end{enumerate}", ""]
     write_out(root, f"ai-prompts.{lang}.{fmt}", out)
 
