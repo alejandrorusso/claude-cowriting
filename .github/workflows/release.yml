@@ -1,0 +1,44 @@
+name: Release
+
+# A tag v<version> publishes a GitHub release with cowrite.zip attached: the
+# plugin folder, zipped as cowrite/, ready for Customize > Plugins > Upload
+# plugin in the desktop app and for `claude --plugin-dir cowrite.zip`.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Zip and release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate plugin
+      - name: Check that the tag matches the manifest
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("plugin/.claude-plugin/plugin.json"))["version"])')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME, but plugin.json says $version"
+            exit 1
+          fi
+      - name: Zip the tracked files of plugin/ as cowrite/
+        run: git archive --format=zip --prefix=cowrite/ -o cowrite.zip HEAD:plugin
+      - name: Release notes from the changelog
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '/^## / { on = ($2 == v) } on { print }' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+      - name: Publish
+        run: gh release create "$GITHUB_REF_NAME" cowrite.zip --title "${GITHUB_REF_NAME#v}" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

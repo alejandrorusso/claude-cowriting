@@ -54,12 +54,13 @@ Answer `y` to add the marketplace, then pick a scope (user scope is recommended)
 
 The desktop app takes a plugin as a zip file. Tested on the Mac: the plugin then works in the app's Code tab, with the pane, the guard and the log.
 
-1. Download the repository from GitHub: on [github.com/dozwa/claude-cowriting](https://github.com/dozwa/claude-cowriting), click **Code > Download ZIP** and unpack it (or `git clone` it).
-2. Zip the `plugin` folder on its own. In the Finder, right-click `plugin` and choose **Compress "plugin"**; in a terminal, run `zip -r plugin.zip plugin -x '*.DS_Store'` inside the unpacked folder. Don't upload the GitHub download as it is: the app wants `.claude-plugin/plugin.json` at the zip's root or inside one top-level folder, and in the full download it sits two folders deep.
-3. In the app, open **Customize > Plugins**, click **Add > Upload plugin** and pick `plugin.zip`.
-4. Open the **Code** tab, start a session in your writing folder, and type `/cowrite:init`. The options above are in `/config`.
+1. Download [cowrite.zip](https://github.com/dozwa/claude-cowriting/releases/latest/download/cowrite.zip), the plugin folder of the newest release. Every release has one under [Releases](https://github.com/dozwa/claude-cowriting/releases).
+2. In the app, open **Customize > Plugins**, click **Add > Upload plugin** and pick the file.
+3. Open the **Code** tab, start a session in your writing folder, and type `/cowrite:init`. The options above are in `/config`.
 
-The upload is a snapshot of the version you downloaded: to update, download and upload again. Alternatively, install from the marketplace in a terminal as above; the desktop app's local sessions read the same settings files, so a plugin installed at user scope shows up in the Code tab too.
+The upload is a snapshot: to update, download the zip of the new release and upload it again. Alternatively, install from the marketplace in a terminal as above; the desktop app's local sessions read the same settings files, so a plugin installed at user scope shows up in the Code tab too.
+
+If you zip a checkout yourself, zip the `plugin` folder on its own. The app wants `.claude-plugin/plugin.json` at the zip's root or inside one top-level folder; in a download of the whole repository it sits two folders deep, and the upload is refused.
 
 ## Start a paper
 
@@ -279,7 +280,7 @@ python3 -m unittest discover -s plugin/tests -p 'test_*.py'   # the Python tools
 python3 scripts/render_sprites.py   # re-render the persona PNGs and the icon
 ```
 
-CI runs the same three checks on every push. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+CI runs the same three checks on every push. A `v<version>` tag, matching the version in `plugin.json`, publishes a GitHub release with `cowrite.zip` attached (the plugin folder, zipped as `cowrite/`) and the changelog section as its notes. The same zip is `git archive --format=zip --prefix=cowrite/ -o cowrite.zip HEAD:plugin`, and `claude --plugin-dir cowrite.zip` loads it for one session. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for adding personas to the catalogue. An expert for your own paper needs no code: `/cowrite:party new`.
 

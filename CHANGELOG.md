@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 (2026-11-04)
 
-- The README says where the plugin works: in a terminal, in the VS Code extension and in the Code tab of the Claude desktop app, where it was tested on the Mac; not in chat, on claude.ai or in the app's Chat tab, because chat ignores a plugin's hooks and agents. It also describes the desktop-app setup: download the repository from GitHub, zip the `plugin` folder on its own, upload it under Customize > Plugins.
+- Every release now has `cowrite.zip` attached: the plugin folder, zipped as `cowrite/`, built by a workflow when a `v<version>` tag is pushed. The newest one is always at https://github.com/dozwa/claude-cowriting/releases/latest/download/cowrite.zip. Upload it under Customize > Plugins in the Claude desktop app, or try it for one session with `claude --plugin-dir cowrite.zip`.
+- The README says where the plugin works: in a terminal, in the VS Code extension and in the Code tab of the Claude desktop app, where it was tested on the Mac; not in chat, on claude.ai or in the app's Chat tab, because chat ignores a plugin's hooks and agents. It also describes the desktop-app setup: download the release zip, upload it under Customize > Plugins.
 
 ## 0.3.1 (2026-11-04)
 
