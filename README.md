@@ -25,7 +25,13 @@ The background research and requirements are in [docs/research-and-requirements.
 
 ## Install
 
-You need Claude Code (in a terminal or the VS Code extension) and Python 3. At the Claude Code prompt, type:
+CoWriting runs in Claude Code: in a terminal, in the VS Code extension, and in the **Code** tab of the Claude desktop app. It needs Python 3 on your machine.
+
+It does **not** work in chat, neither on claude.ai nor in the desktop app's Chat tab. The plugin installs there, but chat ignores a plugin's hooks and agents, so the manuscript guard, the AI log, the assist-only contract and the personas are missing. Don't use it for a paper in chat.
+
+### In a terminal or VS Code
+
+At the Claude Code prompt, type:
 
 ```
 /plugin install cowrite --marketplace dozwa/claude-cowriting
@@ -43,6 +49,17 @@ Answer `y` to add the marketplace, then pick a scope (user scope is recommended)
 | Live review model | Model for `/cowrite:watch` (default `haiku`) |
 | Focus mode | How much of Claude Code's own work the transcript shows: `off`, `calm` (one dim line per action, the default) or `focus` (only you and the personas) |
 | Usage meter | `off`, `tokens`, or `tokens+limits`: context tokens, live-review tokens and, on Pro/Max, the 5-hour and weekly limits, with a warning at 80 % and 95 % |
+
+### In the Claude desktop app
+
+The desktop app takes a plugin as a zip file. Tested on the Mac: the plugin then works in the app's Code tab, with the pane, the guard and the log.
+
+1. Download the repository from GitHub: on [github.com/dozwa/claude-cowriting](https://github.com/dozwa/claude-cowriting), click **Code > Download ZIP** and unpack it (or `git clone` it).
+2. Zip the `plugin` folder on its own. In the Finder, right-click `plugin` and choose **Compress "plugin"**; in a terminal, run `zip -r plugin.zip plugin -x '*.DS_Store'` inside the unpacked folder. Don't upload the GitHub download as it is: the app wants `.claude-plugin/plugin.json` at the zip's root or inside one top-level folder, and in the full download it sits two folders deep.
+3. In the app, open **Customize > Plugins**, click **Add > Upload plugin** and pick `plugin.zip`.
+4. Open the **Code** tab, start a session in your writing folder, and type `/cowrite:init`. The options above are in `/config`.
+
+The upload is a snapshot of the version you downloaded: to update, download and upload again. Alternatively, install from the marketplace in a terminal as above; the desktop app's local sessions read the same settings files, so a plugin installed at user scope shows up in the Code tab too.
 
 ## Start a paper
 
@@ -122,7 +139,7 @@ The workspace recommends these extensions:
 - Markdown All in One
 - Pandoc Citer
 
-The CoWriting pane works in the terminal and in the VS Code extension.
+The CoWriting pane works in the terminal, in the VS Code extension and in the desktop app's Code tab.
 
 ## Daily use
 

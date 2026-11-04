@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The README says where the plugin works: in a terminal, in the VS Code extension and in the Code tab of the Claude desktop app, where it was tested on the Mac; not in chat, on claude.ai or in the app's Chat tab, because chat ignores a plugin's hooks and agents. It also describes the desktop-app setup: download the repository from GitHub, zip the `plugin` folder on its own, upload it under Customize > Plugins.
+
 ## 0.3.1 (2026-11-04)
 
 - The manuscript guard now applies only to papers. It used to refuse every folder named `manuscript`, so with the plugin installed at user scope it also blocked Claude in unrelated projects. A `manuscript` folder is now refused when it lies in the session's paper or directly beside a `paper.json`, wherever that paper is, and when a path or command doesn't show where it points.

@@ -12,7 +12,7 @@ The full documentation, with the commands, the review party and the DFG rational
 
 ## Where it works
 
-**Use CoWriting in Claude Code**, where it needs Python 3 on your machine. On claude.ai the plugin installs, but it doesn't work as described here: in a test, the manuscript guard didn't refuse writes, no AI log was written, the assist-only contract didn't reach Claude, and the personas and `/cowrite:init` failed to load. So don't use it for a paper there. Cowork in the desktop app hasn't been tested, so don't rely on the guard or the log there either.
+**Use CoWriting in Claude Code**: in a terminal, in the VS Code extension, or in the Code tab of the Claude desktop app (tested on the Mac, uploaded as a zip under Customize > Plugins). It needs Python 3 on your machine. In chat, on claude.ai or in the desktop app's Chat tab, the plugin installs but doesn't work as described here: in a test, the manuscript guard didn't refuse writes, no AI log was written, the assist-only contract didn't reach Claude, and the personas and `/cowrite:init` failed to load. So don't use it for a paper there. Cowork in the desktop app hasn't been tested, so don't rely on the guard or the log there either.
 
 ## Examples
 
