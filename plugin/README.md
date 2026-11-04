@@ -8,6 +8,8 @@ Install it in Claude Code with:
 /plugin install cowrite --marketplace dozwa/claude-cowriting
 ```
 
+That works at the prompt of a terminal, of the VS Code extension and of the desktop app's Code tab, and keeps the plugin updatable from `/plugin`. Without git, or for a fixed version, download `cowrite.zip` from a release instead and upload it in the desktop app (Customize > Plugins) or load it with `claude --plugin-dir`. The two routes and when to pick which are compared in the repository's README.
+
 The full documentation, with the commands, the review party and the DFG rationale, is in the repository: https://github.com/dozwa/claude-cowriting
 
 ## Where it works

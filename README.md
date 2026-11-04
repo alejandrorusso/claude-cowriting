@@ -29,15 +29,20 @@ CoWriting runs in Claude Code: in a terminal, in the VS Code extension, and in t
 
 It does **not** work in chat, neither on claude.ai nor in the desktop app's Chat tab. The plugin installs there, but chat ignores a plugin's hooks and agents, so the manuscript guard, the AI log, the assist-only contract and the personas are missing. Don't use it for a paper in chat.
 
-### In a terminal or VS Code
+### Two ways to install
 
-At the Claude Code prompt, type:
+There are two routes on every surface. Pick one, then follow the steps for your surface below.
 
-```
-/plugin install cowrite --marketplace dozwa/claude-cowriting
-```
+| | From the marketplace (automatic) | From the zip (manual) |
+|---|---|---|
+| How | Claude Code fetches the plugin from this repository, which is also its marketplace | You download `cowrite.zip` from a release and hand it to the app, or unzip it for the terminal |
+| Updating | One action per release (**Update now** in `/plugin`), or by itself once you switch auto-update on for the marketplace | Download the new zip and upload it again; what you have stays as it is until then |
+| Needs | git on the machine (Claude Code clones the marketplace with it) and network access at install time | Nothing beyond Python 3; works on a machine without git, and offline once downloaded |
+| Choose it when | You want to stay current without thinking about it, or you work in a terminal or VS Code | You want a known, fixed version (a thesis you don't want to change under you), have no git, or prefer a file over a command in the desktop app |
 
-Answer `y` to add the marketplace, then pick a scope (user scope is recommended). The config screen asks for your options. All of them can be changed later in `/config`:
+Both routes install the same plugin. The marketplace route is the usual one; the zip is for people who want to decide when their tools change, or who can't run git.
+
+Whichever you choose, the config screen asks for your options. All of them can be changed later in `/config`:
 
 | Option | Meaning |
 |---|---|
@@ -52,17 +57,55 @@ Answer `y` to add the marketplace, then pick a scope (user scope is recommended)
 
 The three choice fields (language, focus mode, usage meter) are typed as text in `/config`; a value outside the list falls back to the default.
 
+### In a terminal or VS Code
+
+**From the marketplace.** At the Claude Code prompt, type:
+
+```
+/plugin install cowrite --marketplace dozwa/claude-cowriting
+```
+
+Claude Code shows the marketplace it resolved and asks you to confirm adding it, then opens the plugin's details, where you pick a scope. User scope is recommended: the plugin is then there in every folder, and the desktop app's Code tab sees it too. In the VS Code extension you can also type `/plugins`, add `dozwa/claude-cowriting` on the **Marketplaces** tab, and click **Install** next to CoWriting on the **Plugins** tab. From a shell, without a session:
+
+```
+claude plugin install cowrite --marketplace dozwa/claude-cowriting
+```
+
+**From the zip.** Download [cowrite.zip](https://github.com/dozwa/claude-cowriting/releases/latest/download/cowrite.zip), unzip it, and start Claude Code with the folder:
+
+```
+claude --plugin-dir ~/Downloads/cowrite
+```
+
+This loads the plugin for that session only, so put the flag in a shell alias if you use it daily. The terminal has no permanent zip install; that is what the marketplace route is for.
+
 ### In the Claude desktop app
 
-The desktop app takes a plugin as a zip file. Tested on the Mac: the plugin then works in the app's Code tab, with the pane, the guard and the log.
+Tested on the Mac: the plugin works in the app's Code tab, with the pane, the guard and the log.
+
+**From the marketplace.** The Code tab is a Claude Code session, so the same command works at its prompt:
+
+```
+/plugin install cowrite --marketplace dozwa/claude-cowriting
+```
+
+Confirm the marketplace, pick a scope, done. From then on the **+** button next to the prompt box (**Add plugins**, or **Plugins > Browse plugins**) lists CoWriting among the plugins of your marketplaces, and **Manage plugins** in the same menu enables, disables or uninstalls it. If you installed at user scope in a terminal earlier, nothing is left to do: the app's local sessions read the same settings files.
+
+**From the zip.** The app takes a plugin as a zip file:
 
 1. Download [cowrite.zip](https://github.com/dozwa/claude-cowriting/releases/latest/download/cowrite.zip), the plugin folder of the newest release. Every release has one under [Releases](https://github.com/dozwa/claude-cowriting/releases).
 2. In the app, open **Customize > Plugins**, click **Add > Upload plugin** and pick the file.
 3. Open the **Code** tab, start a session in your writing folder, and type `/cowrite:init`. The options above are in `/config`.
 
-The upload is a snapshot: to update, download the zip of the new release and upload it again. Alternatively, install from the marketplace in a terminal as above; the desktop app's local sessions read the same settings files, so a plugin installed at user scope shows up in the Code tab too.
+The upload is a snapshot: to update, download the zip of the new release and upload it again.
 
 If you zip a checkout yourself, zip the `plugin` folder on its own. The app wants `.claude-plugin/plugin.json` at the zip's root or inside one top-level folder; in a download of the whole repository it sits two folders deep, and the upload is refused.
+
+### Updating
+
+- **Marketplace install.** In a session: `/plugin`, **Installed** tab, CoWriting, **Update now**; or `claude plugin update cowrite@cowriting` in a shell. Claude Code leaves a third-party marketplace alone until you switch it on: `/plugin`, **Marketplaces** tab, `cowriting`, **Enable auto-update**. From then on every release is fetched after a session starts and loaded in the next one; the running session keeps what it loaded.
+- **Zip install.** Download the new `cowrite.zip` and upload it again in the desktop app, or unzip it over the old folder for `--plugin-dir`.
+- **Either way**, a release can change the files a paper carries, such as the guard's rules or the templates. `/cowrite:paper upgrade` in the paper folder lists what an existing paper lacks, and `/cowrite:paper upgrade apply` makes the changes.
 
 ## Start a paper
 
