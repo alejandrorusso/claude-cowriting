@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.4 (2026-11-04)
 
 - The README's install section now gives both routes on every surface: from the marketplace (one command at the prompt of a terminal, VS Code or the desktop app's Code tab; updates from `/plugin`, automatic once auto-update is switched on for the marketplace) and from the zip (a fixed version, no git needed; upload in the desktop app or `--plugin-dir` in a terminal), with a table of what each needs and when to choose it, and an "Updating" part including `/cowrite:paper upgrade`.
 - The manifest no longer declares `options` on its three choice fields (language, focus mode, usage meter). Claude Code documents the key from 2.1.271 on, and the CLI install passed here on 2.1.316 and 2.1.318, but one install on 2.1.316 was refused with `Unrecognized key: "options"` ([#1](https://github.com/dozwa/claude-cowriting/issues/1), reported with a fix in [#2](https://github.com/dozwa/claude-cowriting/pull/2) by alejandrorusso). The allowed values are now in each field's description, `/config` shows the fields as text, and a value outside the list falls back to the default, as the code already did.
