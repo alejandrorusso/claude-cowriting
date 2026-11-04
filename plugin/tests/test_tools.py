@@ -306,6 +306,25 @@ class PaperWorkspace(unittest.TestCase):
         self.assertEqual(run("ailog.py", "prompts", "--lang", "de", "--format", "tex", cwd=self.root).returncode, 0)
         self.assertIn("Antwort auf 2026-10-04 10:00", self.read("ai-prompts.de.tex"))
 
+    def test_a_briefing_proposal_is_disclosed_as_its_own_row(self) -> None:
+        proposal = [
+            {"type": "prompt", "id": "b1", "ts": "2026-10-06T10:00:00Z", "session": "s", "paper": "Testarbeit", "category": "brief-update",
+             "origin": "brief", "agent": "terminologist", "text": "Briefing proposal: what The Terminologist should remember from its input a4, for party.md"},
+            {"type": "response", "ref": "b1", "ts": "2026-10-06T10:00:05Z", "model": "m", "personas": ["terminologist"],
+             "tools_used": [], "ai_text_flag": False, "answer": "- Keep \"subjects\": the field's term."},
+            {"type": "annotation", "ref": "b1", "ts": "2026-10-06T10:01:00Z", "use": "adopted", "note": "- Keep \"subjects\": the field's term."},
+        ]
+        with (self.root / "ai-log" / "2026-10.jsonl").open("a", encoding="utf-8") as f:
+            f.write("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in proposal))
+        self.assertEqual(run("ailog.py", "disclosure", "--lang", "en", "--format", "md", cwd=self.root).returncode, 0)
+        md = self.read("ai-register.en.md")
+        self.assertIn("Briefing lines for a reviewer persona", md)
+        self.assertIn("were proposed by the model from discussions with the author and taken over only after the author confirmed them", md)
+        self.assertEqual(run("ailog.py", "disclosure", "--lang", "de", "--format", "md", cwd=self.root).returncode, 0)
+        self.assertIn("übernommen wurden sie erst nach deren Bestätigung", self.read("ai-register.de.md"))
+        self.assertEqual(run("ailog.py", "prompts", "--lang", "en", "--format", "md", cwd=self.root).returncode, 0)
+        self.assertIn("2026-10-06 10:00 · Briefing lines for a reviewer persona", self.read("ai-prompts.en.md"))
+
     def test_tool_without_a_paper_explains_itself(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             failed = run("ailog.py", "stats", cwd=Path(empty))

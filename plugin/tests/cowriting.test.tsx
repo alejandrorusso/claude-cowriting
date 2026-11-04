@@ -27,6 +27,8 @@ import {
   parseHints,
   parseLog,
   setBrief,
+  appendBrief,
+  briefLines,
   shellPath,
   toUsage,
   usageParts,
@@ -728,8 +730,12 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
     }
     return { value: { exitCode: 0, stdout: 'Annotated p2 as adapted.\n', stderr: '' } as never }
   })
-  on('model.complete', () => ({
-    value: { isAnswered: true as const, text: 'Der Absatz zur Lücke steht jetzt vor der Methode.', usage: {} as never },
+  on('model.complete', (_: unknown, e: { system?: string }) => ({
+    value: {
+      isAnswered: true as const,
+      text: e.system?.includes('distil') ? '- Keep "subjects": the field\'s term.\n- (nothing else)' : 'Der Absatz zur Lücke steht jetzt vor der Methode.',
+      usage: {} as never,
+    },
   }))
   const fills: string[] = []
   on('prompt.fill', (_: unknown, e: { text: string }) => {
@@ -807,6 +813,19 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
   expect(await ui.find({ key: `thread-${answerId}` })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /one answer to your reply/ })).toBeDefined()
 
+  // Remember: the model proposes briefing lines, the author edits and saves them, party.md gets them under the persona
+  await ui.press({ key: 'reading-remember' })
+  expect((await ui.find({ key: 'remember-p2' }))?.props.value).toBe('- Keep "subjects": the field\'s term.')
+  const briefTurn = logOf().find(e => e.type === 'prompt' && e.origin === 'brief')
+  expect(briefTurn?.type === 'prompt' && briefTurn.category).toBe('brief-update')
+  expect(computeStats(logOf(), new Date()).unannotated).toBe(2) // a proposal is not open feedback
+  await ui.input({ key: 'remember-p2', text: '- Keep "subjects": the field\'s term, as I said.', kind: 'change' })
+  await ui.press({ key: 'remember-save' })
+  expect(parseBriefs(files.get(`${ROOT}/party.md`)!)['architect']).toBe('- Keep "subjects": the field\'s term, as I said.')
+  expect(await ui.find({ key: 'remember-p2' })).toBeUndefined()
+  const kept = runs.find(argv => argv.includes('annotate') && argv.includes(briefTurn?.type === 'prompt' ? briefTurn.id : '?'))!
+  expect(kept.slice(-4)).toEqual(['--use', 'adapted', '--note', '- Keep "subjects": the field\'s term, as I said.'])
+
   // what changed since: the autosave commit before the turn, diffed to now, read by the model, and logged
   await ui.press({ key: 'reading-summarize' })
   expect(runs.some(argv => argv[0] === 'git' && argv[1] === 'log' && argv.includes('--before=2026-10-29T08:02:00Z'))).toBe(true)
@@ -819,7 +838,7 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
   expect((await ui.find({ key: 'note-p2' }))?.props.value).toContain('Der Absatz zur Lücke')
   await ui.input({ key: 'note-p2', text: 'Reihenfolge getauscht, Begründung ergänzt', kind: 'change' })
   await ui.press({ key: 'use-p2-adapted' })
-  const annotated = runs.find(argv => argv.includes('annotate'))!
+  const annotated = runs.find(argv => argv.includes('annotate') && argv.includes('p2'))!
   expect(annotated.slice(-4)).toEqual(['--use', 'adapted', '--note', 'Reihenfolge getauscht, Begründung ergänzt'])
   expect(await ui.find({ key: 'reading-back' })).toBeUndefined()
   await ui.unmount()
@@ -852,6 +871,16 @@ test('party.md briefs are read by section, and setting one keeps the rest', asyn
   expect(again.terminologist).toBe('ICD-11 terms only.')
   expect(updated).toContain('<!-- spelling -->') // the guiding comment stays
   expect(parseBriefs(setBrief(updated, 'style-coach', 'First person plural.'))['style-coach']).toBe('First person plural.')
+
+  // Remember appends under the persona, keeps the author's lines and the guiding comment, creates a missing section
+  const remembered = appendBrief(updated, 'grammar-guy', '- Do not flag "data is".')
+  expect(parseBriefs(remembered)['grammar-guy']).toBe('British spelling, Oxford comma.\n- Do not flag "data is".')
+  expect(remembered.split('## grammar-guy')[1]).toContain('<!--')
+  expect(parseBriefs(appendBrief(updated, 'architect', '- Methods before gap is fine here.'))['architect']).toBe('- Methods before gap is fine here.')
+  expect(appendBrief(updated, 'architect', '  ')).toBe(updated)
+  // the model's answer is read as bullets only, two at most, and "nothing to remember" is nothing
+  expect(briefLines('Sure!\n- One.\n* Two.\n- Three.')).toBe('- One.\n- Two.')
+  expect(briefLines('- (nothing to remember)')).toBe('')
 })
 
 test('a persona gets its brief with its task, and /cowrite:brief sets one', async ($, on) => {

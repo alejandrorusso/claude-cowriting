@@ -139,6 +139,51 @@ export const changeSummarySystem = (language: string) =>
   ].join(' ')
 export const changeSummaryPrompt = (feedback: string, diff: string) => `Feedback:\n${feedback}\n\nDiff of the manuscript since then:\n${diff}`
 
+// ------------------------------------------ what a persona should remember
+/** What the model gets when the author asks a persona to remember a discussion. */
+export type BriefProposalInput = {
+  persona: string
+  role: string
+  /** the persona's current brief for this paper; '' without one */
+  brief: string
+  feedback: string
+  /** the author's reply and the persona's answer, when the input closes a discussion; '' otherwise */
+  reply: string
+  answer: string
+  /** the author's comment on the input, when typed */
+  comment: string
+}
+export const briefProposalSystem = (language: string) =>
+  [
+    'You distil, for the author of an academic manuscript, what a reviewer persona should remember from an exchange with the author, as lines of a briefing the persona reads before every review of this paper.',
+    'You get the persona, its current briefing, the feedback it gave, and, if there was one, the author\'s reply and the persona\'s answer, or the author\'s comment.',
+    `Answer in ${language === 'de' ? 'German' : 'English'}, with at most two lines, each starting with "- ", written as instructions to the persona for this paper.`,
+    'Write only what the exchange settled: a preference of the author, a convention of the field, something not to flag again, something to weigh higher or lower. Use the author\'s own words where they said it.',
+    'Do not repeat what the current briefing already says, do not praise, do not summarise the text, do not add advice of your own. If the exchange settled nothing, answer with the single line "- (nothing to remember)".',
+  ].join(' ')
+export const briefProposalPrompt = (input: BriefProposalInput) =>
+  [
+    `Persona: ${input.persona} (${input.role})`,
+    `Current briefing:\n${input.brief || '(none)'}`,
+    `Feedback the persona gave:\n${input.feedback}`,
+    input.reply !== '' ? `The author replied:\n${input.reply}` : '',
+    input.answer !== '' ? `The persona answered:\n${input.answer}` : '',
+    input.comment !== '' ? `The author's comment on the feedback:\n${input.comment}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+/** The model's answer as briefing lines: "- " bullets only, at most two, or '' when it had nothing. */
+export const briefLines = (text: string): string => {
+  const lines = text
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.startsWith('- ') || l.startsWith('* '))
+    .map(l => `- ${l.slice(2).trim()}`)
+    .filter(l => l !== '- ' && !/^- \(nothing/i.test(l))
+    .slice(0, 2)
+  return lines.join('\n')
+}
+
 /** What the four classifications mean, in the words the buttons and the legend use. */
 export const USE_LABELS = {
   adopted: { button: '✓ used', meaning: 'as suggested' },
@@ -190,7 +235,7 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
     // Live hints come in a steady stream, and a turn that only launched a reviewer has nothing to
     // classify: its report does. Classifying those is welcome, not owed.
     const isLaunchOnly = r.agents !== undefined && Object.keys(r.agents).length > 0
-    const isOpen = a === undefined && p.origin !== 'watch' && p.origin !== 'scope' && p.origin !== 'summary' && !isLaunchOnly
+    const isOpen = a === undefined && p.origin !== 'watch' && p.origin !== 'scope' && p.origin !== 'summary' && p.origin !== 'brief' && !isLaunchOnly
     if (isOpen) {
       stats.unannotated += 1
       const who = p.agent ?? r.personas[0]
@@ -777,6 +822,14 @@ export const setBrief = (text: string, key: string, body: string): string => {
   // keep the guiding comment under the heading, replace what the author wrote
   const comment = lines.slice(start + 1, end).filter(l => /^\s*<!--.*-->\s*$/.test(l))
   return [...lines.slice(0, start), `## ${heading}`, ...comment, body.trim(), '', ...lines.slice(end)].join('\n')
+}
+
+/** party.md with lines added under one section's body (the section created when missing), the author's own text kept. */
+export const appendBrief = (text: string, key: string, lines: string): string => {
+  const current = parseBriefs(text)[key] ?? ''
+  const added = lines.trim()
+  if (added === '') return text
+  return setBrief(text, key, current === '' ? added : `${current}\n${added}`)
 }
 
 // ------------------------------------------------------------- autosave

@@ -4,8 +4,8 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -447,6 +447,13 @@ export async function writeBrief($: Engine, root: string, key: string, body: str
   const path = join(root, BRIEF_FILE)
   const before = (await $.fs.exists(path)) ? await $.fs.read(path) : '# Briefing for the review party\n'
   await $.fs.write(path, setBrief(before, key, body))
+}
+
+/** Adds lines under one persona's section of party.md, keeping what the author wrote there. */
+export async function appendBriefLines($: Engine, root: string, key: string, lines: string): Promise<void> {
+  const path = join(root, BRIEF_FILE)
+  const before = (await $.fs.exists(path)) ? await $.fs.read(path) : '# Briefing for the review party\n'
+  await $.fs.write(path, appendBrief(before, key, lines))
 }
 
 // ===== autosave =====
@@ -1158,6 +1165,13 @@ type PaneProps = {
   onNote: (text: string, isTyped: boolean) => void
   /** starts a reply to the opened input in the prompt box */
   onReply: () => void
+  /** asks the model what the persona should remember from this input and its discussion */
+  onRemember: () => void
+  /** the proposal as the author edits it in the field */
+  onProposal: (text: string) => void
+  /** writes the (edited) proposal into the persona's section of party.md */
+  onRememberSave: () => void
+  onRememberDiscard: () => void
   watch: WatchState
   onWatchToggle: () => void
   reviews: Review[]
@@ -1641,7 +1655,31 @@ function drawReading($: Engine, e: RenderInput, reading: Reading, props: PanePro
           hotkey="c"
           onPress={props.onSummarize}
         />
+        {reading.persona !== '' && (
+          <Button key="reading-remember" label={reading.isProposing ? 'Thinking…' : 'Remember'} hotkey="m" onPress={props.onRemember} />
+        )}
       </Box>
+      {reading.proposal !== '' && (
+        <Box flexDirection="column">
+          <Text weight="bold">What {reading.who} would keep in mind for this paper, in party.md once you save it:</Text>
+          {Input !== null ? (
+            <Input
+              key={`remember-${reading.id}`}
+              label="Briefing lines"
+              value={reading.proposal}
+              rows={3}
+              onInput={(text: string) => props.onProposal(text)}
+              onSubmit={(text: string) => props.onProposal(text)}
+            />
+          ) : (
+            <Markdown text={reading.proposal} />
+          )}
+          <Box flexDirection="row">
+            <Button key="remember-save" label="Save to party.md" hotkey="s" onPress={props.onRememberSave} />
+            <Button key="remember-discard" label="Discard" onPress={props.onRememberDiscard} />
+          </Box>
+        </Box>
+      )}
       {reading.summary !== '' && (
         <Box flexDirection="column">
           <Text weight="bold">Since then, by the model's reading of your diff:</Text>
@@ -1930,7 +1968,7 @@ async function focusMode($: Engine, cfg: Config): Promise<FocusMode> {
   return (await read($, focusAtom)) ?? cfg.focus
 }
 
-async function annotate($: Engine, cfg: Config, ref: string, use: string, note = ''): Promise<void> {
+async function annotate($: Engine, cfg: Config, ref: string, use: string, note = '', isShown = true): Promise<void> {
   const snapshot = await read($, snapshotAtom)
   if (snapshot.paper === null) return
   const root = snapshot.paper.root
@@ -1939,7 +1977,8 @@ async function annotate($: Engine, cfg: Config, ref: string, use: string, note =
   const ran = await withLog(root, () =>
     $.process.run(['python3', `${$.plugin.root}/tools/ailog.py`, 'annotate', ref, '--use', use, ...(comment === '' ? [] : ['--note', comment])], { cwd: root }),
   )
-  $.ui.toast(ran.exitCode === 0 ? `Annotated as ${use}` : `Annotation failed: ${ran.stderr.slice(0, 80)}`)
+  // a proposal's own annotation (what the author did with it) is bookkeeping, not news
+  if (isShown || ran.exitCode !== 0) $.ui.toast(ran.exitCode === 0 ? `Annotated as ${use}` : `Annotation failed: ${ran.stderr.slice(0, 80)}`)
   if (ran.exitCode === 0) {
     // a classified review's hints leave the Live tab and the band; the opened turn closes
     await update($, watchAtom, s => (s.hints.some(h => h.ref === ref) ? { ...s, hints: s.hints.filter(h => h.ref !== ref) } : s))
@@ -1984,6 +2023,10 @@ async function openTurn($: Engine, id: string): Promise<void> {
     .filter(p => entries.some(x => x.type === 'response' && x.ref === p.id))
     .map(link)
   typedNote = ''
+  // for Remember: the discussion this input closes (the feedback it answers and the author's reply) and the persona's brief
+  const feedbackText = parent === undefined ? '' : readable(parent.origin === 'agent' ? parent.text : (entries.find(x => x.type === 'response' && x.ref === parent.id) as { answer?: string } | undefined)?.answer ?? '')
+  const thread = authorReply === undefined || parent === undefined ? null : { feedback: feedbackText, reply: replyWords(authorReply.text) }
+  const brief = persona === undefined ? '' : ((await readBriefs($, snapshot.paper.root).catch(() => ({}) as Record<string, string>))[persona] ?? '')
   const open: Reading = {
     id,
     ts: prompt.ts,
@@ -1992,6 +2035,12 @@ async function openTurn($: Engine, id: string): Promise<void> {
     persona: persona ?? '',
     parent: parent === undefined ? null : link(parent),
     replies,
+    brief,
+    thread,
+    proposal: '',
+    proposed: '',
+    proposalRef: '',
+    isProposing: false,
     asked:
       authorReply !== undefined
         ? `your reply: ${replyWords(authorReply.text) || '(no text)'}`
@@ -2053,6 +2102,105 @@ function replyWords(text: string): string {
 
 /** The reply the author sent last, waiting for the persona's answer; a hand-back from that persona closes it. */
 let pendingReply: { ref: string; persona: string } | null = null
+
+/**
+ * Remember: the model distils the input and its discussion into at most two briefing lines for the
+ * persona. They are shown in a field, logged as AI input of their own, and written to party.md only
+ * when the author saves them; the annotation on the logged turn says what the author did with them.
+ */
+async function rememberFrom($: Engine, cfg: Config): Promise<void> {
+  const reading = (await read($, readingAtom)).open
+  const snapshot = await read($, snapshotAtom)
+  if (reading === null || reading.persona === '' || reading.isProposing || snapshot.paper === null) return
+  const paper = snapshot.paper
+  const persona = personaById(reading.persona)
+  const patch = async (change: Partial<Reading>): Promise<void> => {
+    await update($, readingAtom, s => (s.open === null || s.open.id !== reading.id ? s : { open: { ...s.open, ...change } }))
+  }
+  await patch({ isProposing: true })
+  const model = cfg.watchModel
+  const answer = await $.model
+    .complete({
+      model,
+      system: briefProposalSystem(paper.language),
+      prompt: briefProposalPrompt({
+        persona: reading.who,
+        role: persona?.role ?? '',
+        brief: reading.brief,
+        feedback: reading.thread?.feedback ?? reading.text,
+        reply: reading.thread?.reply ?? '',
+        answer: reading.thread === null ? '' : reading.text,
+        comment: typedNote.trim(),
+      }),
+      maxTokens: 300,
+      effort: 'low',
+      timeoutMs: 60_000,
+    })
+    .catch(() => null)
+  if (answer === null || !answer.isAnswered) {
+    await patch({ isProposing: false })
+    $.ui.toast('The proposal failed; try again later.')
+    return
+  }
+  const lines = briefLines(answer.text)
+  const id = newId()
+  const ts = new Date(await $.clock.now()).toISOString()
+  await appendLog($, paper.root, {
+    type: 'prompt',
+    id,
+    ts,
+    session: await $.session.id(),
+    paper: paper.name,
+    category: 'brief-update',
+    origin: 'brief',
+    agent: reading.persona,
+    text: `Briefing proposal: what ${reading.who} should remember from its input ${reading.id}${reading.thread === null ? '' : ' and the discussion on it'}, for party.md`,
+  })
+  await appendLog($, paper.root, {
+    type: 'response',
+    ref: id,
+    ts,
+    model,
+    personas: [reading.persona],
+    tools_used: [],
+    ai_text_flag: false,
+    answer: answer.text.trim() || '(no text)',
+  })
+  if (lines === '') {
+    await patch({ isProposing: false })
+    $.ui.toast(`${reading.who} found nothing to remember from this exchange.`)
+    await annotate($, cfg, id, 'info', 'nothing to remember', false)
+    return
+  }
+  await patch({ isProposing: false, proposal: lines, proposed: lines, proposalRef: id })
+  await refresh($, cfg)
+}
+
+/** The field's text, as the author edits the proposal. */
+async function setProposal($: Engine, text: string): Promise<void> {
+  await update($, readingAtom, s => (s.open === null ? s : { open: { ...s.open, proposal: text } }))
+}
+
+/** Save: the lines go under the persona's heading in party.md; the logged proposal is annotated with what was written. */
+async function saveRemembered($: Engine, cfg: Config): Promise<void> {
+  const reading = (await read($, readingAtom)).open
+  const snapshot = await read($, snapshotAtom)
+  if (reading === null || reading.persona === '' || reading.proposal.trim() === '' || snapshot.paper === null) return
+  const lines = briefLines(reading.proposal) || reading.proposal.trim()
+  await appendBriefLines($, snapshot.paper.root, reading.persona, lines)
+  await update($, readingAtom, s => (s.open === null || s.open.id !== reading.id ? s : { open: { ...s.open, proposal: '', proposed: '', proposalRef: '', brief: s.open.brief === '' ? lines : `${s.open.brief}\n${lines}` } }))
+  $.ui.toast(`📋 ${reading.who} will keep that in mind: party.md`)
+  if (reading.proposalRef !== '') await annotate($, cfg, reading.proposalRef, lines === reading.proposed ? 'adopted' : 'adapted', lines, false)
+  await refresh($, cfg)
+}
+
+/** Discard: nothing is written; the logged proposal is annotated as rejected. */
+async function discardRemembered($: Engine, cfg: Config): Promise<void> {
+  const reading = (await read($, readingAtom)).open
+  if (reading === null || reading.proposal === '') return
+  await update($, readingAtom, s => (s.open === null || s.open.id !== reading.id ? s : { open: { ...s.open, proposal: '', proposed: '', proposalRef: '' } }))
+  if (reading.proposalRef !== '') await annotate($, cfg, reading.proposalRef, 'rejected', '', false)
+}
 
 /** The comment: typed into the field, or taken from the summary (then the field is redrawn with it). */
 async function setNote($: Engine, text: string, isTyped: boolean): Promise<void> {
@@ -2376,7 +2524,7 @@ export const register: Register = (on, options) => {
     if (tab !== undefined) await update($, tabAtom, () => tab)
     await refresh($, cfg)
     await $.ui.open({ id: PANE, title: 'CoWriting', focus: true, backgroundColor: 'transparent' })
-    return { text: `CoWriting pane${tab ? ` · ${tab}` : ''} · number keys switch tabs, r refresh, Esc back` }
+    return { text: `CoWriting pane${tab ? ` · ${tab}` : ''} · number keys switch tabs, r refresh, o open feedback, y reply, c what changed, m remember, Esc back` }
   }).catch(commandFailed)
 
   on('command.run', { command: 'cowrite:paper' }, async ($, e) => {
@@ -2837,6 +2985,10 @@ export const register: Register = (on, options) => {
       onSummarize: () => void summarizeChanges($, cfg),
       onNote: (text, isTyped) => void setNote($, text, isTyped),
       onReply: () => void replyTo($),
+      onRemember: () => void rememberFrom($, cfg),
+      onProposal: text => void setProposal($, text),
+      onRememberSave: () => void saveRemembered($, cfg),
+      onRememberDiscard: () => void discardRemembered($, cfg),
       onWatchToggle: () => void setWatching($, cfg, !watch.isOn),
       personas: partyPersonas(snapshot.paper?.party ?? []),
       isGame,

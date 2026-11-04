@@ -12,9 +12,11 @@ export type PromptEntry = {
    * 'agent': not typed by the author but a subagent's report handed back to the session;
    * 'watch': a live review the plugin started while the author wrote;
    * 'scope': a check of which planned points the text already makes;
-   * 'summary': a description of what the manuscript's diff shows since a piece of feedback
+   * 'summary': a description of what the manuscript's diff shows since a piece of feedback;
+   * 'brief': lines of briefing for a persona distilled from a discussion, written to party.md only
+   * when the author confirms (the annotation says whether they did)
    */
-  origin?: 'agent' | 'watch' | 'scope' | 'summary'
+  origin?: 'agent' | 'watch' | 'scope' | 'summary' | 'brief'
   /** for origin 'agent': the persona whose report this is */
   agent?: string
   /**
@@ -84,7 +86,7 @@ export type RecentTurn = {
   answer: string
   /** who it came from: the persona, if any */
   persona?: string
-  origin?: 'agent' | 'watch' | 'scope' | 'summary'
+  origin?: 'agent' | 'watch' | 'scope' | 'summary' | 'brief'
   /** the entry this turn answers, when it is part of a reply thread */
   replyTo?: string
   personas: string[]
@@ -118,6 +120,17 @@ export type Reading = {
   /** what the model read in the manuscript's diff since this turn; '' until asked */
   summary: string
   isSummarizing: boolean
+  /** the persona's current section of party.md; '' without one */
+  brief: string
+  /** the discussion this input closes, for Remember: the feedback and the author's reply; null for a first input */
+  thread: { feedback: string; reply: string } | null
+  /** briefing lines the model proposed for the persona, as the field shows them; '' until asked, or discarded */
+  proposal: string
+  /** the proposal as the model wrote it, to tell an edit from an adoption */
+  proposed: string
+  /** the log id of the proposal's turn, for its annotation */
+  proposalRef: string
+  isProposing: boolean
 }
 
 /** Another input in the same thread, as the reading view links it. */

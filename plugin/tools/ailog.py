@@ -26,7 +26,7 @@ USES = ("adopted", "adapted", "rejected", "info")
 
 # Turns the plugin starts on its own, by origin: they are AI input and are disclosed,
 # but the author owes them no classification (the pane does not count them as open).
-AUTO_ORIGINS = {"watch": "live-review", "scope": "scope-check", "summary": "change-summary"}
+AUTO_ORIGINS = {"watch": "live-review", "scope": "scope-check", "summary": "change-summary", "brief": "brief-update"}
 
 CATEGORY_LABELS = {
     "en": {
@@ -44,6 +44,7 @@ CATEGORY_LABELS = {
         "live-review": "Live review while writing (short hints on changed paragraphs)",
         "scope-check": "Check of the planned points against the text",
         "change-summary": "Description of what the manuscript's diff shows since a piece of feedback (the author classifies)",
+        "brief-update": "Briefing lines for a reviewer persona, distilled from a feedback discussion; written to party.md only once the author confirmed them",
     },
     "de": {
         "literature": "Literaturrecherche und Quellenprüfung",
@@ -60,6 +61,7 @@ CATEGORY_LABELS = {
         "live-review": "Live-Review beim Schreiben (kurze Hinweise zu geänderten Absätzen)",
         "scope-check": "Abgleich der geplanten Punkte mit dem Text",
         "change-summary": "Beschreibung, was der Diff des Manuskripts seit einem Hinweis zeigt (die Einordnung trifft die Autorin bzw. der Autor)",
+        "brief-update": "Briefing-Zeilen für eine Reviewer-Persona, aus einer Feedback-Diskussion destilliert; erst nach Bestätigung durch die Autorin bzw. den Autor in party.md geschrieben",
     },
 }
 
@@ -285,6 +287,14 @@ def cmd_disclosure(root: Path, args) -> None:
         "AI tool call (listed below), and the manuscript's version history (git) shows how the text came about. All AI interactions "
         "were logged automatically (ai-log/)."
     )
+    if any(t["prompt"].get("origin") == "brief" for t in ts):
+        intro += (
+            " Einzelne Briefing-Zeilen für die Reviewer-Personas (party.md) hat das Modell aus Diskussionen mit der Autorin bzw. dem Autor "
+            "vorgeschlagen; übernommen wurden sie erst nach deren Bestätigung."
+            if de else
+            " Some briefing lines for the reviewer personas (party.md) were proposed by the model from discussions with the author "
+            "and taken over only after the author confirmed them."
+        )
     head = ["Zweck", "Werkzeug / Modell", "Umfang", "Verwendung", "Kapitel"] if de else ["Purpose", "Tool / model", "Extent", "Use", "Chapters"]
     lang_note = (
         "Reine Sprachkorrekturen (Grammatik/Rechtschreibung) müssen laut DFG in Anträgen nicht offengelegt werden; manche Hochschulen verlangen es dennoch."

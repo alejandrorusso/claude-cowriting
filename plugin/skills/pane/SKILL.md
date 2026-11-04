@@ -1,6 +1,6 @@
 ---
 name: pane
-description: Open the CoWriting pane: review party, open feedback to read and classify, live hints, AI log, scope, progress.
+description: Open the CoWriting pane: review party, open feedback to read, classify, reply to and have a persona remember, live hints, AI log, scope, progress.
 argument-hint: "[party|feedback|live|log|scope|progress]"
 disable-model-invocation: true
 ---
