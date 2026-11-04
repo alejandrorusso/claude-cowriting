@@ -104,3 +104,23 @@ Claude_CoWriting/
 3. Reference manager: Zotero, BibTeX or other?
 4. Should grammar/spelling feedback be allowed to give the corrected form, or only point at the problem?
 5. Language of the texts: German, English or both?
+
+## 6. Next: the user interface, consolidated before anything new
+
+Noted after testing 0.3.5 in VS Code (2026-11-04). The feature set is ahead of its usability; the next work is on the interface, and no new feature starts before the existing ones are mature.
+
+### What testing showed (Feedback pane)
+
+- **Saving a comment is unintuitive.** The comment field sits between the buttons and the text, and nothing says when a comment is kept: it is only taken along with the classification. The author expects a visible save, or a clear "goes with your choice" cue.
+- **The feedback text appears twice.** The opened input shows the persona's report and then Claude's words, which largely repeat it; the reading view needs one text, with Claude's addition only where it adds something.
+- **A reply's conversation belongs in the thread.** A reply is typed in the prompt box and the persona's answer appears in the main chat; the thread links in the pane come afterwards. The author expects the exchange inside the one feedback thread in the pane, with the reply typed there.
+- **Too much at once.** Choices, Reply, "What did I change since?", Remember, comment, thread links and the text share one short view; the hierarchy is unclear.
+
+### How to proceed
+
+1. **Requirements list.** Rework section 3 into a maintained list: each requirement with its current state (met, partly, open) and the open usability points above as requirements of their own.
+2. **User stories.** For the pane, the writing flow and the feedback loop: "As an author, I …, so that …", one story per task (read a piece of feedback, decide what I did with it, ask the persona back, keep what a discussion settled, see what is still open).
+3. **Acceptance criteria per story.** Observable, testable, on every surface (terminal, VS Code, desktop app): which elements are visible without scrolling, what one click or key does, what is logged, what the disclosure says.
+4. **Then build**, story by story, against the criteria; the hooks tests cover each criterion that a test can reach, the rest is a manual check on the three surfaces, written down.
+
+No new features in the meantime. The parked items (human-first folder layout, removal of the unused language option) wait behind this.
