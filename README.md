@@ -50,6 +50,8 @@ Answer `y` to add the marketplace, then pick a scope (user scope is recommended)
 | Focus mode | How much of Claude Code's own work the transcript shows: `off`, `calm` (one dim line per action, the default) or `focus` (only you and the personas) |
 | Usage meter | `off`, `tokens`, or `tokens+limits`: context tokens, live-review tokens and, on Pro/Max, the 5-hour and weekly limits, with a warning at 80 % and 95 % |
 
+The three choice fields (language, focus mode, usage meter) are typed as text in `/config`; a value outside the list falls back to the default.
+
 ### In the Claude desktop app
 
 The desktop app takes a plugin as a zip file. Tested on the Mac: the plugin then works in the app's Code tab, with the pane, the guard and the log.

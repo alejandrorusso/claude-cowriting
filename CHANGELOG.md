@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The manifest no longer declares `options` on its three choice fields (language, focus mode, usage meter). Claude Code documents the key from 2.1.271 on, and the CLI install passed here on 2.1.316 and 2.1.318, but one install on 2.1.316 was refused with `Unrecognized key: "options"` ([#1](https://github.com/dozwa/claude-cowriting/issues/1), reported with a fix in [#2](https://github.com/dozwa/claude-cowriting/pull/2) by alejandrorusso). The allowed values are now in each field's description, `/config` shows the fields as text, and a value outside the list falls back to the default, as the code already did.
 - **A paper without git.** `/cowrite:init` now asks whether the paper is versioned with git and explains both choices in the question itself, for authors who have never used git. Without git (`--versioning none`, `"versioning": "none"` in `paper.json`) no repository is created and git is never called: autosave is off for that paper whatever the option says, "What did I change since?" says there is no history to compare, the guard's toast says "check the file", and the pane header says `no git`. The AI log, the party and the disclosure are unchanged. `/cowrite:paper versioning` says which it is; `/cowrite:paper versioning git` creates the repository and switches autosave on, `none` switches it off. A machine without git gets a paper without versioning and a line that says so.
 
 ## 0.3.3 (2026-11-04)

@@ -697,6 +697,17 @@ test('calm shows Claude Code steps as one line, focus hides them, /cowrite:quiet
   await focus.unmount()
 })
 
+// The manifest declares no `options` lists (an install on Claude Code 2.1.316 refused the key, issue #1),
+// so /config takes any text: a value outside the list falls back to the default.
+test('a focus mode outside the list counts as calm', { options: { focusMode: 'loud', usageMeter: 'all' } }, async ($, on) => {
+  workspace(on, paperFiles())
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+  // with no argument the command steps to the next mode: from calm that is focus
+  const next = await $.command.run({ command: 'cowrite:quiet', args: '', origin: { kind: 'composer' }, presentation })
+  expect(next.text).toContain('Focus: focus')
+})
+
 test('the Feedback tab and the persona badge lead to the whole input, a comment, the diff summary and the choices', async ($, on) => {
   const files = paperFiles()
   const log = [
