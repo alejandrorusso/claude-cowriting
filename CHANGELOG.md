@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 (2026-11-04)
 
 - **Feedback reads as Markdown, with the buttons on top.** An opened input on the Feedback tab was drawn as raw text, so a persona's headings, bold and tables showed as `##`, `**` and `|`, and in the VS Code pane a long report pushed the choices out of reach. The report, Claude's words and the diff summary are now Markdown elements, and the four choices, Reply, "What did I change since?" and the comment field sit above the text.
 - **Reply.** A `Reply` button (`y`) on an opened input writes a line into the prompt box that addresses it: the persona's agent (or Claude for its own answer), the category, the time and the log entry, after anything already drafted. The author types the reply behind it and presses Enter; the plugin sends nothing by itself. For a persona, Claude hands the agent its earlier feedback with the reply and relays the answer as given.
