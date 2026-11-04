@@ -18,12 +18,16 @@ import {
   computeStats,
   countWords,
   isManuscriptPath,
+  liesIn,
   limitCrossed,
+  manuscriptParents,
+  manuscriptPathsIn,
   overrelianceNudge,
   parseBriefs,
   parseHints,
   parseLog,
   setBrief,
+  shellPath,
   toUsage,
   usageParts,
   watchExcerpt,
@@ -270,6 +274,107 @@ test('the plugin refuses edits to the manuscript and allows notes', async ($, on
   expect(note.deny).toBeUndefined()
   const elsewhere = await $.tool.call({ tool: 'Write', file_path: '/elsewhere/CLAUDE.md', content: 'x' })
   expect(elsewhere.deny).toBeUndefined()
+})
+
+test('whose manuscript folder a path names can be told from the path', async () => {
+  expect(manuscriptParents('/p/manuscript/main.md')).toEqual(['/p'])
+  expect(manuscriptParents('/p/Manuscript/main.md')).toEqual(['/p'])
+  expect(manuscriptParents('/p/notes/../manuscript/main.md')).toEqual(['/p'])
+  expect(manuscriptParents('/manuscript/x.md')).toEqual(['/'])
+  expect(manuscriptParents('/a/manuscript/b/manuscript/x.md')).toEqual(['/a', '/a/manuscript/b'])
+  expect(manuscriptParents('C:\\p\\manuscript\\main.md')).toEqual(['C:/p'])
+  expect(manuscriptParents('/p/manuscript/*.md')).toEqual(['/p'])
+  // these could name any paper
+  expect(manuscriptParents('$DIR/manuscript/main.md')).toBeNull()
+  expect(manuscriptParents('/p/$DIR/manuscript/main.md')).toBeNull()
+  expect(manuscriptParents('/p/*/main.md')).toBeNull()
+  expect(manuscriptParents('~other/manuscript/main.md')).toBeNull()
+
+  expect(shellPath('~/p/manuscript/x', '/w', '/home/u')).toBe('/home/u/p/manuscript/x')
+  expect(shellPath('~/p/manuscript/x', '/w', '')).toBe('~/p/manuscript/x')
+  expect(shellPath('manuscript/x', '/w', '')).toBe('/w/manuscript/x')
+  expect(shellPath('$D/manuscript/x', '/w', '')).toBe('$D/manuscript/x')
+  expect(liesIn('/p/notes/../manuscript/x', '/P')).toBe(true)
+  expect(liesIn('/pp/manuscript/x', '/p')).toBe(false)
+
+  expect(manuscriptPathsIn('echo x > manuscript/m.md', '/w', '')).toEqual(['/w/manuscript/m.md'])
+  expect(manuscriptPathsIn('cd /p && echo x > manuscript/m.md', '/w', '')).toEqual(['/w/manuscript/m.md', '/p/manuscript/m.md'])
+  expect(manuscriptPathsIn('cd /p; cd sub; cp a manuscript/', '/w', '')).toContain('/p/sub/manuscript/')
+  // quotes hold a word together, whatever is in it
+  expect(manuscriptPathsIn('echo x > "/my dir/manuscript/m.md"', '/w', '')).toEqual(['/my dir/manuscript/m.md'])
+  expect(manuscriptPathsIn('echo x > /my\\ dir/manuscript/m.md', '/w', '')).toEqual(['/my dir/manuscript/m.md'])
+  expect(manuscriptPathsIn('echo x > "$D"/manuscript/m.md', '/w', '')).toEqual(['$D/manuscript/m.md'])
+  expect(manuscriptPathsIn('cd "/my dir" && echo x > manuscript/m.md', '/w', '')).toContain('/my dir/manuscript/m.md')
+  expect(manuscriptPathsIn('pandoc n.md --output=manuscript/m.md', '/w', '')).toEqual(['/w/manuscript/m.md'])
+  // nothing to go on
+  expect(manuscriptPathsIn('python3 -c "open(\'manuscript/m.md\',\'w\')"', '/w', '')).toBeNull()
+  expect(manuscriptPathsIn('echo x > $(pwd)/manuscript/m.md', '/w', '')).toBeNull()
+  expect(manuscriptPathsIn('echo x > `pwd`/manuscript/m.md', '/w', '')).toBeNull()
+  expect(manuscriptPathsIn('rsync a host:manuscript/m.md', '/w', '')).toBeNull()
+})
+
+test('a manuscript folder in another project is left alone', async ($, on) => {
+  workspace(on, new Map([[`${ROOT}/manuscript/old.md`, 'x']]))
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  for (const input of [
+    { tool: 'Write', file_path: `${ROOT}/manuscript/x.md`, content: 'x' },
+    { tool: 'Write', file_path: 'manuscript/x.md', content: 'x' },
+    { tool: 'Edit', file_path: '/other/manuscript/x.md', old_string: 'a', new_string: 'b' },
+    { tool: 'Bash', command: 'echo x > manuscript/x.md' },
+    { tool: 'Bash', command: 'cp a.md manuscript/' },
+    { tool: 'Bash', command: 'cd manuscript && echo x > x.md' },
+    { tool: 'Bash', command: 'cd /other && echo x > manuscript/x.md' },
+    { tool: 'Bash', command: "sed -i '' 's/a/b/' manuscript/x.md" },
+    { tool: 'Bash', command: 'rm -f manuscript/*.bak' },
+  ]) {
+    const result = await $.tool.call(input as never)
+    expect(result.deny).toBeUndefined()
+  }
+})
+
+test("a paper's manuscript folder is refused from anywhere, and what can't be told is refused too", async ($, on) => {
+  on('env.get', () => ({ value: '/home/u' }))
+  workspace(on, new Map([
+    ['/p/paper.json', '{}'],
+    ['/p/manuscript/main.md', 'x'],
+    ['/home/u/p/paper.json', '{}'],
+    [`${ROOT}/projects/a/paper.json`, '{}'],
+    ['/my dir/paper.json', '{}'],
+  ]))
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  for (const input of [
+    { tool: 'Edit', file_path: '/p/manuscript/main.md', old_string: 'a', new_string: 'b' },
+    { tool: 'Write', file_path: '/p/Manuscript/new.md', content: 'x' },
+    { tool: 'Write', file_path: '~/p/manuscript/main.md', content: 'x' },
+    { tool: 'Write', file_path: 'projects/a/manuscript/m.md', content: 'x' },
+    { tool: 'Write', file_path: '$DIR/manuscript/main.md', content: 'x' },
+    { tool: 'Bash', command: 'echo x > /p/manuscript/main.md' },
+    { tool: 'Bash', command: 'cd /p && echo x > manuscript/main.md' },
+    { tool: 'Bash', command: 'cd /p/manuscript && echo x > main.md' },
+    { tool: 'Bash', command: 'echo x > projects/a/manuscript/m.md' },
+    { tool: 'Bash', command: 'echo x > ~/p/manuscript/main.md' },
+    { tool: 'Bash', command: 'cp a.md "/my dir/manuscript/main.md"' },
+    { tool: 'Bash', command: 'echo x > $DIR/manuscript/main.md' },
+    { tool: 'Bash', command: 'cp a.md $(pwd)/manuscript/main.md' },
+  ]) {
+    const result = await $.tool.call(input as never)
+    expect(result.deny).toContain('CoWriting')
+  }
+})
+
+test("in a session on a paper, Claude's own places stay closed to a manuscript folder", async ($, on) => {
+  workspace(on, paperFiles())
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+
+  const nested = await $.tool.call({ tool: 'Write', file_path: `${ROOT}/notes/ai/manuscript/x.md`, content: 'x' })
+  expect(nested.deny).toContain('CoWriting')
+  const other = await $.tool.call({ tool: 'Write', file_path: '/other/manuscript/x.md', content: 'x' })
+  expect(other.deny).toBeUndefined()
 })
 
 test('a manuscript change during a tool call is logged as a guard event and shown', async ($, on) => {

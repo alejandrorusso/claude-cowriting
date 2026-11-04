@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 (2026-11-04)
+
+- The manuscript guard now applies only to papers. It used to refuse every folder named `manuscript`, so with the plugin installed at user scope it also blocked Claude in unrelated projects. A `manuscript` folder is now refused when it lies in the session's paper or directly beside a `paper.json`, wherever that paper is, and when a path or command doesn't show where it points.
+- If a paper's `paper.json` is gone, the hook no longer protects its `manuscript` folder. The workspace's deny rules and sandbox still do.
+- The plugin README now says where the plugin works, how privacy and support are handled, and gives three examples. It also discloses that `/cowrite:init` turns on the sandbox and limits its network access, and it no longer lists the sprite renderer, which isn't part of the plugin.
+- The description of `/cowrite:paper` no longer contains `<name>`: claude.ai refuses to install a plugin with XML-like tags in a skill description.
+- The manifest has a `displayName`, an author URL, a homepage and a repository.
+
 ## 0.3.0 (2026-11-04)
 
 ### Switching from `cw`

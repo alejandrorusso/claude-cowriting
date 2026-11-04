@@ -10,11 +10,23 @@ Install it in Claude Code with:
 
 The full documentation, with the commands, the review party and the DFG rationale, is in the repository: https://github.com/dozwa/claude-cowriting
 
+## Where it works
+
+**Use CoWriting in Claude Code**, where it needs Python 3 on your machine. On claude.ai the plugin installs, but it doesn't work as described here: in a test, the manuscript guard didn't refuse writes, no AI log was written, the assist-only contract didn't reach Claude, and the personas and `/cowrite:init` failed to load. So don't use it for a paper there. Cowork in the desktop app hasn't been tested, so don't rely on the guard or the log there either.
+
+## Examples
+
+Try these in a paper folder. The repository's [demo paper](https://github.com/dozwa/claude-cowriting/tree/main/examples/demo-paper) is a ready-made fictional workspace with sample data.
+
+1. `/cowrite:init` sets up a paper: it asks for the format, the language, the folder and who joins your review party.
+2. `/cowrite:summon grammar-guy manuscript/main.md` asks one persona to review your text and give located feedback. It doesn't change the text.
+3. `/cowrite:disclosure` turns the AI log into an AI register for your declaration of authorship or your journal.
+
 ## What the plugin does on your machine
 
 - **Reads** your paper workspace: `manuscript/`, `literature/`, `party.md`, `scope.md`, and, if configured, your Obsidian vault.
 - **Writes** only outside your text: the AI log (`ai-log/`), the disclosure (`disclosure/`), `notes/ai/`, `.cowriting/` (plan, game state, verification summary) and an `AI-Notes/` folder in your vault. `manuscript/` and your other files are guarded: a hook refuses writes it recognises, the workspace settings deny the rest, and any change that still happens during an AI tool call is logged as a `guard` entry.
-- **Runs** its Python tools (standard library only) from the plugin folder: the AI log, the scaffold, the bibliography reader, the DOI check, the Zotero search and the sprite renderer. With pandoc installed, `.docx` and `.odt` manuscripts are converted to text for reading.
+- **Runs** its Python tools (standard library only) from the plugin folder: the AI log, the scaffold, the bibliography reader, the style profile, the DOI check and the Zotero search. With pandoc installed, `.docx` and `.odt` manuscripts are converted to text for reading.
 - **Commits** with git when autosave is on (the default): `manuscript/` and `ai-log/`, under your own git identity, after you pause for 30 seconds. Nothing is pushed.
 - **Connects** to three places, and only when you ask: Crossref (`api.crossref.org`) to verify DOIs and look up titles during `/cowrite:sources`, `/cowrite:submit` and `verify_refs.py`; your running Zotero 7 on `localhost` when the local API is enabled; and the web through Claude Code's own search tools when a persona looks for literature. Nothing else leaves your machine. What Claude itself sees is governed by your Claude Code account and settings.
 - **Shows** a pane beside the chat with the party, the log's open turns, your word counts and, optionally, a token meter.
@@ -27,17 +39,27 @@ The plugin is a mod: `hooks/register.tsx` runs inside Claude Code. This is every
 
 **Prompts.** On `prompt.compose` it adds one section to the system prompt: the CoWriting contract (the assist-only rules the author's `CLAUDE.md` also states) and the roster of this paper's review party. On `prompt.submit` it reads each prompt to write a log entry; it changes nothing and drops nothing. The pane's buttons submit a prompt of their own: the summon button sends "Use the cowrite:<persona> agent to review <section>", with the section or file name the author chose, and the scope button sends the fixed interview text. Nothing read from a file goes into a submitted prompt.
 
-**Tool calls.** On `tool.call` for `Read` of a `.docx` or `.odt` in `manuscript/`, the hook converts the file with pandoc and returns that text in place of the tool's result; for every other file the tool runs as usual. On every other `tool.call`, the hook refuses a write it recognises into the author's files (`manuscript/`, `literature/`, `party.md`, `scope.md`, the author's notes), then compares those files before and after the call and logs any change as a `guard` entry. It never approves a call; the user's permission rules and prompts decide as they would without the plugin.
+**Tool calls.** On `tool.call` for `Read` of a `.docx` or `.odt` in `manuscript/`, the hook converts the file with pandoc and returns that text in place of the tool's result; for every other file the tool runs as usual. On every other `tool.call`, the hook refuses a write it recognises into the author's files (`manuscript/`, `literature/`, `party.md`, `scope.md`, the author's notes), then compares those files before and after the call and logs any change as a `guard` entry. A `manuscript` folder counts as the author's when it lies in the session's paper or directly beside a `paper.json`; when a path or command doesn't show where it points (a shell variable, a command substitution, an inline script), the hook refuses it, because it could name a paper. A `manuscript` folder in any other project is left alone. It never approves a call; the user's permission rules and prompts decide as they would without the plugin.
 
 **Subagents.** On `agent.offer` it hides catalogue personas that are not in this paper's party. On `agent.spawn` it appends two things to a persona's task: where the paper is, when the session runs elsewhere, and the author's briefing for that persona from `party.md`. It sets no model and no permission mode. Experts of the author's own (`party/<id>.md`) are registered as `cowrite:<id>` agents with read-only tools.
 
 **Programs it runs**, all with the user's own access, none reaching the network: `git` (`status`, `add`, `commit` in the paper folder, for autosave; never `push`), `pandoc` (to read `.docx` and `.odt`), and `python3` with two of the plugin's own files: `tools/ailog.py annotate` (classifies a log entry) and `tools/new_paper.py --upgrade` (the workspace upgrade). The arguments are the paper's paths and the author's choices.
 
-**Files it writes**, all inside the paper folder unless named otherwise: `ai-log/<month>.jsonl` (appended), `.cowriting/game.json`, `.cowriting/scope-check.json`, `paper.json` (the party roster), `party.md` (a brief, its section only), `party/<id>.md` (the skeleton for a new expert), and `.active-project` in the session's folder (the name of the paper opened with `/cowrite:paper`). Two files that other tools obey are written by `tools/new_paper.py` on `/cowrite:init` and on `/cowrite:paper upgrade apply` only: the workspace's `.claude/settings.json` (deny rules and sandbox paths that protect the author's files) and its `CLAUDE.md` (the assist-only rules). On an upgrade, your previous copy is kept under `.cowriting/upgrade/<time>/`.
+**Files it writes**, all inside the paper folder unless named otherwise: `ai-log/<month>.jsonl` (appended), `.cowriting/game.json`, `.cowriting/scope-check.json`, `paper.json` (the party roster), `party.md` (a brief, its section only), `party/<id>.md` (the skeleton for a new expert), and `.active-project` in the session's folder (the name of the paper opened with `/cowrite:paper`). Two files that other tools obey are written by `tools/new_paper.py` on `/cowrite:init` and on `/cowrite:paper upgrade apply` only: the workspace's `.claude/settings.json` (deny rules and sandbox paths that protect the author's files; it also turns on Claude Code's sandbox for that workspace, which limits shell commands' network access to `api.crossref.org`, `doi.org` and `*.doi.org`) and its `CLAUDE.md` (the assist-only rules). On an upgrade, your previous copy is kept under `.cowriting/upgrade/<time>/`.
 
 **Model calls.** `$.model.complete` is used in two places, both through the user's own Claude Code account: the live review (`/cowrite:watch`) sends the changed paragraphs of the manuscript to the model named in the "Live review model" option, and `/cowrite:scope check` sends the manuscript and the scope's points. Both are logged like any AI input.
 
 **Other hooks.** `session.start` registers the commands and the pane, `session.measure` feeds the usage meter, `turn.complete` logs the response and starts the autosave timer, and the `ui.render` hooks draw the pane, the band above the prompt and the dimmed transcript of focus mode. The mod reads one environment variable, `HOME`, to expand `~` in paths. It makes no network request of its own.
+
+## Privacy
+
+The plugin has no server of its own and collects nothing for its authors. Your logs, notes and game state stay in your workspace. The AI log (`ai-log/`) holds your prompts and Claude's answers; it is append-only and stays until you delete it. Autosave commits the log to your local git repository and never pushes, so check that you're happy to publish your prompts before you push that repository anywhere public, or switch autosave off.
+
+What leaves your machine is listed under *Connects* above. What you send to Claude is governed by your Claude account and settings. Don't put confidential review material or unpublished third-party data into prompts.
+
+## Support
+
+Report bugs, security problems and questions through the repository's [issues](https://github.com/dozwa/claude-cowriting/issues).
 
 ## Settings
 

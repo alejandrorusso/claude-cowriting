@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, Usage, WatchState } from '../types'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, computeStats, countWords, cut, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, limitCrossed, localTime, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, READ_ONLY_TOOLS, setBrief, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, computeStats, countWords, cut, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -311,6 +311,40 @@ async function resolvePath($: Engine, arg: string): Promise<string> {
   if (raw === '~' || raw.startsWith('~/')) return join((await $.env.get('HOME')) ?? '', raw.slice(1)).replace(/(.)\/$/, '$1')
   const path = raw.startsWith('/') ? raw : join(await $.session.cwd(), raw)
   return path.replace(/(.)\/$/, '$1')
+}
+
+/** Is one of these paths in a paper's `manuscript` folder? One that can't be told counts as yes. */
+async function namesPaperManuscript($: Engine, paths: readonly string[]): Promise<boolean> {
+  for (const path of paths) {
+    const parents = manuscriptParents(path)
+    if (parents === null) return true
+    for (const parent of parents) {
+      if (await $.fs.exists(join(parent, 'paper.json'))) return true
+    }
+  }
+  return false
+}
+
+/** `$HOME`, read only when the text being resolved has a `~` to expand. */
+async function homeFor($: Engine, text: string): Promise<string> {
+  return text.includes('~') ? (await $.env.get('HOME')) ?? '' : ''
+}
+
+/** Does this file tool's path lie in a `manuscript` folder of a paper? The session's paper counts wherever in it the folder is. */
+async function fileHitsPaperManuscript($: Engine, path: string): Promise<boolean> {
+  if (!isManuscriptPath(path)) return false
+  const full = shellPath(path, await $.session.cwd(), await homeFor($, path))
+  const paper = await findPaper($)
+  if (paper !== null && liesIn(full, paper.root)) return true
+  return namesPaperManuscript($, [full])
+}
+
+/** Would this command write to a `manuscript` folder of a paper? In a session on a paper, its text alone decides, as it always did. */
+async function bashHitsPaperManuscript($: Engine, command: string): Promise<boolean> {
+  if (!bashTouchesManuscript(command)) return false
+  if ((await findPaper($)) !== null) return true
+  const paths = manuscriptPathsIn(command, await $.session.cwd(), await homeFor($, command))
+  return paths === null || namesPaperManuscript($, paths)
 }
 
 async function kindOf($: Engine, path: string): Promise<'file' | 'dir' | 'other' | 'none'> {
@@ -2155,9 +2189,9 @@ export const register: Register = (on, options) => {
     const path = String(input.file_path ?? input.notebook_path ?? '')
     const command = String(input.command ?? '')
     const isFileWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)
-    // a manuscript folder is refused wherever it is, paper or not
-    if (isFileWrite && isManuscriptPath(path)) return { deny: GUARD_MESSAGE }
-    if (tool === 'Bash' && bashTouchesManuscript(command)) return { deny: GUARD_MESSAGE }
+    // a paper's manuscript folder is refused wherever the paper is; a folder of that name in another project is not ours
+    if (isFileWrite && (await fileHitsPaperManuscript($, path))) return { deny: GUARD_MESSAGE }
+    if (tool === 'Bash' && (await bashHitsPaperManuscript($, command))) return { deny: GUARD_MESSAGE }
     // inside the paper, everything but Claude's own places is the author's
     const paper = READ_ONLY_TOOLS.has(tool) ? null : await findPaper($).catch(() => null)
     if (paper !== null && (isFileWrite || tool === 'Bash')) {

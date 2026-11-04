@@ -206,7 +206,8 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
 // Inside a paper, Claude writes only in its own places (`CLAUDE_WRITES`); every other file is
 // the author's. Three layers, each honest about its reach:
 // 1. File tools (Write, Edit, …) are refused by path: `..` is resolved, case is ignored. A
-//    `manuscript` folder is refused anywhere, the rest of the author's files inside the paper.
+//    paper's `manuscript` folder is refused wherever the paper is (`manuscriptParents`), the rest
+//    of the author's files inside the paper. A folder of that name in another project is left alone.
 // 2. Shell commands are refused by pattern. This is a best effort: a variable, a script file or
 //    a symlink can get past it, and the README says so. The workspace's settings add the OS
 //    sandbox for what the patterns cannot see.
@@ -307,8 +308,60 @@ export const bashWritesTo = (command: string, isTarget: (path: string) => boolea
   return mentions && writes
 }
 
-/** Would this shell command change a file in a `manuscript` folder, wherever the paper is? */
+/** Would this shell command change a file in a `manuscript` folder? Whose folder it is, is for `manuscriptPathsIn` to tell. */
 export const bashTouchesManuscript = (command: string): boolean => bashWritesTo(command, isManuscriptPath, ['manuscript'])
+
+const isRooted = (path: string) => path.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(path)
+
+/** Does this path lie below `root`? `..` is resolved and case ignored. */
+export const liesIn = (path: string, root: string): boolean => {
+  const base = segmentsOf(root)
+  const segs = segmentsOf(path)
+  return segs.length > base.length && base.every((s, i) => s.toLowerCase() === segs[i]!.toLowerCase())
+}
+
+/** A path as the shell or a file tool means it: `~/x` from home, `x` from `base`; a variable stays as written, so unrooted. */
+export const shellPath = (path: string, base: string, home: string): string => {
+  if (path === '~' || path.startsWith('~/')) return home === '' ? path : `${home}${path.slice(1)}`
+  return isRooted(path) || /^[$~]/.test(path) ? path : `${base}/${path}`
+}
+
+/**
+ * The folders that directly hold a `manuscript` folder on this rooted path: where a `paper.json`
+ * makes it a paper's. Null when that can't be told, because the path isn't rooted or a variable or
+ * glob comes before the first `manuscript`. The guard refuses those, since they could name a paper.
+ */
+export const manuscriptParents = (path: string): string[] | null => {
+  if (!isRooted(path)) return null
+  const prefix = path.startsWith('/') ? '/' : ''
+  const segs = segmentsOf(path)
+  const parents: string[] = []
+  for (const [i, s] of segs.entries()) {
+    if (/[$*?[`]/.test(s)) return parents.length > 0 ? parents : null
+    if (s.toLowerCase() === 'manuscript') parents.push(prefix + segs.slice(0, i).join('/'))
+  }
+  return parents
+}
+
+// a shell word: quotes hold it together and go, a backslash keeps the next character
+const SHELL_WORD = /(?:\\.|"[^"]*"|'[^']*'|[^\s'"=();&|<>,`])+/g
+const unquoted = (word: string) => word.replace(/\\(.)|"([^"]*)"|'([^']*)'/g, (_, a, b, c) => a ?? b ?? c ?? '')
+
+/**
+ * Every place this command's `manuscript` words could name: a relative word from the session's
+ * folder and from each folder the command `cd`s to. Null when the text can't tell (a command
+ * substitution, or no such word at all, as in `host:manuscript/x`); the guard refuses those.
+ */
+export const manuscriptPathsIn = (command: string, cwd: string, home: string): string[] | null => {
+  if (/\$\(|`/.test(command)) return null
+  const words = (command.match(SHELL_WORD) ?? []).map(unquoted)
+  const bases = [cwd]
+  for (const [i, word] of words.entries()) {
+    if (word === 'cd' && words[i + 1] !== undefined) bases.push(shellPath(words[i + 1]!, bases[bases.length - 1]!, home))
+  }
+  const named = words.filter(isManuscriptPath)
+  return named.length === 0 ? null : [...new Set(named.flatMap(word => bases.map(base => shellPath(word, base, home))))]
+}
 
 export const GUARD_MESSAGE =
   'CoWriting: the manuscript/ folder is written by its human author only (DFG good scientific practice: ' +
