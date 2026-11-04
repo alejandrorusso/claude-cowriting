@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-04)
+
+### Switching from `cw`
+
+- The plugin has a new name, so updating `cw` does not bring it. Remove the old one and install the new one: `/plugin uninstall cw@cowriting`, `/plugin marketplace update cowriting`, `/plugin install cowrite --marketplace dozwa/claude-cowriting`.
+- Your papers stay as they are. In each one, `/cowrite:paper upgrade apply` replaces `CLAUDE.md` with the version that names the new commands and keeps your copy under `.cowriting/upgrade/<time>/`. Comments in `party.md`, `scope.md` and `literature/style-models/README.md` still say `/cw:`, because those files are yours; they have no effect.
+- The entry for 0.2.0 below writes commands as `/cowrite:`. In that release they were `/cw:`.
 
 ### The plugin is now `cowrite`
 
