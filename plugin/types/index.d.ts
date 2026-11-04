@@ -94,6 +94,8 @@ export type Reading = {
   category: string
   /** who said it: the persona, or Claude */
   who: string
+  /** the persona's agent id, for a reply; '' when Claude itself answered */
+  persona: string
   /** what the author asked, or what the turn was */
   asked: string
   /** the whole answer, readable; for a persona's report, the report itself */

@@ -1156,6 +1156,8 @@ type PaneProps = {
   onSummarize: () => void
   /** the comment typed, or taken from the summary */
   onNote: (text: string, isTyped: boolean) => void
+  /** starts a reply to the opened input in the prompt box */
+  onReply: () => void
   watch: WatchState
   onWatchToggle: () => void
   reviews: Review[]
@@ -1598,12 +1600,13 @@ function drawScope($: Engine, e: RenderInput, scope: ScopeProgress | null, colum
 const whoSaid = (turn: RecentTurn) => (turn.persona !== undefined ? personaById(turn.persona)?.name ?? turn.persona : 'Claude')
 
 /**
- * One AI input opened whole: who said it, what you asked, what it said, a comment field, the four choices,
- * and a button that asks the model what your manuscript's diff since then shows.
+ * One AI input opened whole: who said it, the four choices, a reply and the diff question, a comment field,
+ * then what you asked and what it said, drawn as Markdown. Everything to press sits above the text, so a
+ * long report (a persona's table of corrections) never pushes the choices out of a short pane.
  */
 function drawReading($: Engine, e: RenderInput, reading: Reading, props: PaneProps) {
   const elements = $.ui.resolve(e)
-  const { Box, Text, Button } = elements
+  const { Box, Text, Button, Markdown } = elements
   // a surface without a text field (none of the three here, but the table allows it) gets no comment
   const Input = 'Input' in elements ? elements.Input : null
   return (
@@ -1618,10 +1621,19 @@ function drawReading($: Engine, e: RenderInput, reading: Reading, props: PanePro
           </Text>
         </Text>
       </Box>
-      <Text dimColor>you asked: {reading.asked}</Text>
-      <Text>it said: {reading.text}</Text>
-      {reading.reply !== '' && <Text dimColor>Claude then said: {reading.reply}</Text>}
       <Box flexDirection="row">
+        {USES.map(use => (
+          <Button
+            key={`use-${reading.id}-${use}`}
+            label={USE_LABELS[use].button}
+            hotkey={USE_HOTKEY[use]}
+            onPress={() => props.onAnnotate(reading.id, use, typedNote)}
+          />
+        ))}
+      </Box>
+      <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
+      <Box flexDirection="row">
+        <Button key="reading-reply" label="Reply" hotkey="y" onPress={props.onReply} />
         <Button
           key="reading-summarize"
           label={reading.isSummarizing ? 'Reading your diff…' : 'What did I change since?'}
@@ -1631,9 +1643,8 @@ function drawReading($: Engine, e: RenderInput, reading: Reading, props: PanePro
       </Box>
       {reading.summary !== '' && (
         <Box flexDirection="column">
-          <Text>
-            <Text weight="bold">Since then, by the model's reading of your diff:</Text> {reading.summary}
-          </Text>
+          <Text weight="bold">Since then, by the model's reading of your diff:</Text>
+          <Markdown text={reading.summary} />
           <Button key="reading-use-summary" label="Use as comment" hotkey="u" onPress={() => props.onNote(reading.summary, false)} />
         </Box>
       )}
@@ -1648,17 +1659,15 @@ function drawReading($: Engine, e: RenderInput, reading: Reading, props: PanePro
           onSubmit={(text: string) => props.onNote(text, true)}
         />
       )}
-      <Text dimColor>{USES.map(use => `${USE_LABELS[use].button} = ${USE_LABELS[use].meaning}`).join(' · ')}</Text>
-      <Box flexDirection="row">
-        {USES.map(use => (
-          <Button
-            key={`use-${reading.id}-${use}`}
-            label={USE_LABELS[use].button}
-            hotkey={USE_HOTKEY[use]}
-            onPress={() => props.onAnnotate(reading.id, use, typedNote)}
-          />
-        ))}
-      </Box>
+      <Text dimColor>you asked: {reading.asked}</Text>
+      <Text weight="bold">it said:</Text>
+      <Markdown text={reading.text} />
+      {reading.reply !== '' && (
+        <Box flexDirection="column">
+          <Text weight="bold">Claude then said:</Text>
+          <Markdown text={reading.reply} dimColor />
+        </Box>
+      )}
     </Box>
   )
 }
@@ -1920,7 +1929,7 @@ async function annotate($: Engine, cfg: Config, ref: string, use: string, note =
 // ===== reading one AI input whole =====
 
 const NO_READING: ReadingState = { open: null }
-const readingAtom = atom({ plugin: 'cowrite', key: 'reading' } as const, NO_READING, { shape: 'reading-1' })
+const readingAtom = atom({ plugin: 'cowrite', key: 'reading' } as const, NO_READING, { shape: 'reading-3' })
 // What the comment field holds as typed: kept outside the atom so a keystroke redraws nothing.
 let typedNote = ''
 
@@ -1942,6 +1951,7 @@ async function openTurn($: Engine, id: string): Promise<void> {
     category: turn?.category ?? prompt.category,
     who: persona !== undefined ? personaById(persona)?.name ?? persona : 'Claude',
     asked: isReport ? 'its report on your text' : readable(prompt.text) || '(no text)',
+    persona: persona ?? '',
     text: (isReport ? readable(prompt.text) : readable(response.answer)) || '(no text)',
     reply: isReport ? readable(response.answer) : '',
     note: '',
@@ -1957,6 +1967,24 @@ async function openFor($: Engine, personaId: string): Promise<void> {
   const { stats } = await read($, snapshotAtom)
   const turn = stats.open.find(t => t.persona === personaId)
   if (turn !== undefined) await openTurn($, turn.id)
+}
+
+/**
+ * Reply: the opened input's address goes into the prompt box, after whatever is drafted there, and the
+ * author types the reply itself. A persona's answer comes through its agent, as a summon does; Claude's
+ * own answer is continued in the chat. Nothing is sent until the author presses Enter.
+ */
+async function replyTo($: Engine): Promise<void> {
+  const reading = (await read($, readingAtom)).open
+  if (reading === null) return
+  const when = `${reading.category} feedback from ${localTime(reading.ts)}, log entry ${reading.id}`
+  const text =
+    reading.persona === ''
+      ? `About your ${when}: `
+      : `Reply to ${reading.who} (the cowrite:${reading.persona} agent) on its ${when}. ` +
+        'Hand it the feedback and my reply, relay its answer as given, no rewritten text. My reply: '
+  const filled = await $.prompt.fill({ text, mode: 'append' })
+  $.ui.toast(filled.isFilled ? 'Your reply starts in the prompt box: type it and press Enter.' : 'No prompt box to write the reply into.')
 }
 
 /** The comment: typed into the field, or taken from the summary (then the field is redrawn with it). */
@@ -2729,6 +2757,7 @@ export const register: Register = (on, options) => {
       onCloseReading: () => void update($, readingAtom, () => NO_READING),
       onSummarize: () => void summarizeChanges($, cfg),
       onNote: (text, isTyped) => void setNote($, text, isTyped),
+      onReply: () => void replyTo($),
       onWatchToggle: () => void setWatching($, cfg, !watch.isOn),
       personas: partyPersonas(snapshot.paper?.party ?? []),
       isGame,

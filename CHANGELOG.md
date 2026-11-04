@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Feedback reads as Markdown, with the buttons on top.** An opened input on the Feedback tab was drawn as raw text, so a persona's headings, bold and tables showed as `##`, `**` and `|`, and in the VS Code pane a long report pushed the choices out of reach. The report, Claude's words and the diff summary are now Markdown elements, and the four choices, Reply, "What did I change since?" and the comment field sit above the text.
+- **Reply.** A `Reply` button (`y`) on an opened input writes a line into the prompt box that addresses it: the persona's agent (or Claude for its own answer), the category, the time and the log entry, after anything already drafted. The author types the reply behind it and presses Enter; the plugin sends nothing by itself. For a persona, Claude hands the agent its earlier feedback with the reply and relays the answer as given.
+
 ## 0.3.4 (2026-11-04)
 
 - The README's install section now gives both routes on every surface: from the marketplace (one command at the prompt of a terminal, VS Code or the desktop app's Code tab; updates from `/plugin`, automatic once auto-update is switched on for the marketplace) and from the zip (a fixed version, no git needed; upload in the desktop app or `--plugin-dir` in a terminal), with a table of what each needs and when to choose it, and an "Updating" part including `/cowrite:paper upgrade`.

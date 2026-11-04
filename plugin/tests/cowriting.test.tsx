@@ -731,6 +731,11 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
   on('model.complete', () => ({
     value: { isAnswered: true as const, text: 'Der Absatz zur Lücke steht jetzt vor der Methode.', usage: {} as never },
   }))
+  const fills: string[] = []
+  on('prompt.fill', (_: unknown, e: { text: string }) => {
+    fills.push(e.text)
+    return { isFilled: true }
+  })
   mock.clock(on, { now: 1_000_000 })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const logOf = () => [...files.entries()].filter(([k]) => k.startsWith(`${ROOT}/ai-log/`)).flatMap(([, v]) => parseLog(v))
@@ -757,14 +762,18 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
   expect(await ui.find({ type: 'Text', text: /Top issue: the red thread breaks/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /✓ used = as suggested/ })).toBeUndefined()
   await ui.press({ key: 'open-p2' })
-  expect(await ui.find({ type: 'Text', text: /it said: The red thread breaks after the gap/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /Claude then said: .*Top issue/ })).toBeDefined()
+  // the report and Claude's words are drawn as Markdown (a persona's tables and headings render), the choices above them
+  expect(await ui.find({ type: 'Markdown', text: /The red thread breaks after the gap/ })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: /Top issue/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /✓ used = as suggested/ })).toBeDefined()
 
+  // a reply starts in the prompt box, addressed to the persona's agent; the author types and sends it
+  await ui.press({ key: 'reading-reply' })
+  expect(fills[0]).toMatch(/^Reply to The Architect \(the cowrite:architect agent\) on its structure feedback from .*log entry p2\./)
   // what changed since: the autosave commit before the turn, diffed to now, read by the model, and logged
   await ui.press({ key: 'reading-summarize' })
   expect(runs.some(argv => argv[0] === 'git' && argv[1] === 'log' && argv.includes('--before=2026-10-29T08:02:00Z'))).toBe(true)
-  expect(await ui.find({ type: 'Text', text: /Der Absatz zur Lücke steht jetzt vor der Methode/ })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: /Der Absatz zur Lücke steht jetzt vor der Methode/ })).toBeDefined()
   expect(logOf().filter(e => e.type === 'prompt' && e.origin === 'summary').length).toBe(1)
   expect(computeStats(logOf(), new Date()).unannotated).toBe(1) // the summary is AI input, but not one the author owes a classification
 
