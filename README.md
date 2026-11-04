@@ -23,6 +23,8 @@ CoWriting turns these rules into features:
 
 The background research and requirements are in [docs/research-and-requirements.md](docs/research-and-requirements.md). How each feature maps to the DFG principles is in [docs/gwp-rationale.md](docs/gwp-rationale.md).
 
+> **Early alpha.** CoWriting is under development and a one-person project. Commands, files and the folder layout can change massively between releases, and an update may ask you to upgrade an existing paper. Keep your own backups of your manuscript. Feedback, bugs and ideas are welcome as [GitHub issues](https://github.com/dozwa/claude-cowriting/issues) or by mail to dorianzwanzig@gmail.com. The software comes as is, without warranty or liability of any kind, as the [MIT license](LICENSE) states; see [Disclaimer](#disclaimer).
+
 ## Install
 
 CoWriting runs in Claude Code: in a terminal, in the VS Code extension, and in the **Code** tab of the Claude desktop app. It needs Python 3 on your machine.
@@ -323,6 +325,10 @@ Do not put confidential review material or unpublished third-party data into pro
 ## Disclaimer
 
 CoWriting supports good practice. It doesn't replace the rules of your university, journal or funder, and it doesn't replace your own judgement. Check what your examination regulations or target journal require, and adapt the generated disclosure to them.
+
+CoWriting is in early alpha and maintained by one person in their spare time. Functions, commands, file formats and the folder structure can change massively from one release to the next, with no promise of backward compatibility beyond what the release notes say, and there is no guaranteed support or response time. The software is provided "as is", without warranty of any kind, express or implied, and the author is not liable for any claim, damages or other liability arising from its use, including lost text, a wrong or incomplete AI disclosure, or a decision of your university, journal or funder. Those are the terms of the [MIT license](LICENSE), and they apply to the whole project. You remain responsible for your manuscript, your backups and your declarations.
+
+Found a problem or have an idea? Open an [issue on GitHub](https://github.com/dozwa/claude-cowriting/issues) or write to dorianzwanzig@gmail.com.
 
 ## Development
 
