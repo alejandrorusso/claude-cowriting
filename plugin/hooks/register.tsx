@@ -4,8 +4,8 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, Usage, WatchState } from '../types'
 import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -1334,9 +1334,10 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
             {open.map((turn, i) => (
               <Button key={`open-${turn.id}`} plain hotkey={i === 0 ? 'o' : undefined} onPress={() => props.onOpen(turn.id)}>
                 <Text>
-                  • <Text weight="bold">{whoSaid(turn)}</Text>
+                  {turn.replyTo !== undefined ? '↳' : '•'} <Text weight="bold">{whoSaid(turn)}</Text>
                   <Text dimColor>
                     {' '}· {localTime(turn.ts)} · {turn.category}
+                    {turn.replyTo !== undefined ? ' · answers your reply' : ''}
                     {turn.isAiText ? ' · [AI-TEXT]' : ''}
                   </Text>{' '}
                   {cut(turn.answer, width)}
@@ -1659,6 +1660,28 @@ function drawReading($: Engine, e: RenderInput, reading: Reading, props: PanePro
           onSubmit={(text: string) => props.onNote(text, true)}
         />
       )}
+      {reading.parent !== null && (
+        <Box flexDirection="row">
+          <Text dimColor>↳ in the thread on </Text>
+          <Button key={`thread-${reading.parent.id}`} plain onPress={() => props.onOpen(reading.parent!.id)}>
+            <Text color="info">
+              {reading.parent.who}'s feedback from {localTime(reading.parent.ts)}
+            </Text>
+          </Button>
+        </Box>
+      )}
+      {reading.replies.length > 0 && (
+        <Box flexDirection="row">
+          <Text dimColor>↳ {reading.replies.length === 1 ? 'one answer to your reply: ' : `${reading.replies.length} answers to your replies: `}</Text>
+          {reading.replies.map(r => (
+            <Button key={`thread-${r.id}`} plain onPress={() => props.onOpen(r.id)}>
+              <Text color="info">
+                {r.who} at {localTime(r.ts)}{' '}
+              </Text>
+            </Button>
+          ))}
+        </Box>
+      )}
       <Text dimColor>you asked: {reading.asked}</Text>
       <Text weight="bold">it said:</Text>
       <Markdown text={reading.text} />
@@ -1944,14 +1967,37 @@ async function openTurn($: Engine, id: string): Promise<void> {
   const turn = snapshot.stats.open.find(t => t.id === id) ?? snapshot.stats.recent.find(t => t.id === id)
   const persona = prompt.agent ?? response.personas[0]
   const isReport = prompt.origin === 'agent'
+  const prompts = entries.filter((x): x is PromptEntry => x.type === 'prompt')
+  const byId = (ref: string | undefined) => (ref === undefined ? undefined : prompts.find(x => x.id === ref))
+  const link = (p: PromptEntry): ThreadLink => {
+    const who = p.agent ?? entries.find(x => x.type === 'response' && x.ref === p.id && x.personas[0] !== undefined)
+    const name = typeof who === 'string' ? who : who?.type === 'response' ? who.personas[0] : undefined
+    return { id: p.id, ts: p.ts, who: name !== undefined ? personaById(name)?.name ?? name : 'Claude' }
+  }
+  // the thread: a persona's answer sits behind the author's reply, which sits behind the feedback;
+  // Claude's own answer to a reply is that reply's turn itself
+  const authorReply = isReport ? byId(prompt.replyTo) : prompt.replyTo !== undefined ? prompt : undefined
+  const parent = byId(authorReply?.replyTo)
+  const replies = prompts
+    .filter(p => p.replyTo === id && p.origin === undefined)
+    .map(r => prompts.find(p => p.replyTo === r.id && p.origin === 'agent') ?? r)
+    .filter(p => entries.some(x => x.type === 'response' && x.ref === p.id))
+    .map(link)
   typedNote = ''
   const open: Reading = {
     id,
     ts: prompt.ts,
     category: turn?.category ?? prompt.category,
     who: persona !== undefined ? personaById(persona)?.name ?? persona : 'Claude',
-    asked: isReport ? 'its report on your text' : readable(prompt.text) || '(no text)',
     persona: persona ?? '',
+    parent: parent === undefined ? null : link(parent),
+    replies,
+    asked:
+      authorReply !== undefined
+        ? `your reply: ${replyWords(authorReply.text) || '(no text)'}`
+        : isReport
+          ? 'its report on your text'
+          : readable(prompt.text) || '(no text)',
     text: (isReport ? readable(prompt.text) : readable(response.answer)) || '(no text)',
     reply: isReport ? readable(response.answer) : '',
     note: '',
@@ -1986,6 +2032,27 @@ async function replyTo($: Engine): Promise<void> {
   const filled = await $.prompt.fill({ text, mode: 'append' })
   $.ui.toast(filled.isFilled ? 'Your reply starts in the prompt box: type it and press Enter.' : 'No prompt box to write the reply into.')
 }
+
+/** The address line `replyTo` writes, read back when the author sends it: which entry, and whose agent (or '' for Claude). */
+const REPLY_ADDRESS = /^(?:Reply to |About your )[^\n]*?\blog entry ([A-Za-z0-9_-]+)\b/
+const REPLY_AGENT = /\(the cowrite:([a-z0-9-]+) agent\)/
+
+function replyAddress(text: string): { ref: string; persona: string } | null {
+  const ref = REPLY_ADDRESS.exec(text)?.[1]
+  if (ref === undefined) return null
+  return { ref, persona: REPLY_AGENT.exec(text)?.[1] ?? '' }
+}
+
+/** The author's words behind the address line: what the persona was asked. */
+function replyWords(text: string): string {
+  const cut = text.indexOf('My reply: ')
+  if (cut >= 0) return text.slice(cut + 'My reply: '.length).trim()
+  const colon = text.indexOf(': ')
+  return (colon >= 0 ? text.slice(colon + 2) : text).trim()
+}
+
+/** The reply the author sent last, waiting for the persona's answer; a hand-back from that persona closes it. */
+let pendingReply: { ref: string; persona: string } | null = null
 
 /** The comment: typed into the field, or taken from the summary (then the field is redrawn with it). */
 async function setNote($: Engine, text: string, isTyped: boolean): Promise<void> {
@@ -2481,16 +2548,28 @@ export const register: Register = (on, options) => {
         : personaById(spawned.get(agentId) ?? personaForAgent(await readLog($, paper.root), agentId) ?? '')
     if (agent !== undefined) turn.personas.add(agent.id)
     if (agentId !== undefined) await finishReview($, agentId)
+    // A reply the author typed behind the pane's address line answers a logged input, and keeps its
+    // category; the persona's answer that comes back for it answers the reply. That is the thread.
+    const replied = e.origin?.kind === 'composer' ? replyAddress(e.text) : null
+    const repliedTo = replied === null ? undefined : (await readLog($, paper.root)).find(x => x.type === 'prompt' && x.id === replied.ref)
+    const answers = agent !== undefined && pendingReply?.persona === agent.id ? pendingReply.ref : undefined
+    if (answers !== undefined) pendingReply = null
+    if (replied !== null) pendingReply = replied.persona === '' ? null : { ref: id, persona: replied.persona }
+    const replyTo = replied?.ref ?? answers
     await appendLog($, paper.root, {
       type: 'prompt',
       id,
       ts: new Date().toISOString(),
       session: await $.session.id(),
       paper: paper.name,
-      category: agent?.category ?? categoryFor(e.command?.name, e.command ? e.command.args : e.text),
+      category:
+        agent?.category ??
+        (repliedTo?.type === 'prompt' ? repliedTo.category : undefined) ??
+        categoryFor(e.command?.name, e.command ? e.command.args : e.text),
       ...(e.command ? { command: e.command.name } : {}),
       ...(agentId !== undefined ? { origin: 'agent' as const } : {}),
       ...(agent !== undefined ? { agent: agent.id } : {}),
+      ...(replyTo !== undefined ? { replyTo } : {}),
       text: e.text,
     }).catch(() => undefined)
     return result

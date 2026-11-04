@@ -286,6 +286,26 @@ class PaperWorkspace(unittest.TestCase):
         self.assertEqual(tex.count("\\item "), 4)
         self.assertNotIn("Hinweis 1", tex, "answers only on request")
 
+    def test_a_reply_thread_is_shown_in_the_prompts_appendix(self) -> None:
+        thread = [
+            {"type": "prompt", "id": "a5", "ts": "2026-10-05T10:00:00Z", "session": "s", "paper": "Testarbeit", "category": "terminology",
+             "replyTo": "a4", "text": "Reply to The Terminologist (the cowrite:terminologist agent) on its terminology feedback from 10:00, log entry a4. My reply: the field says subjects."},
+            {"type": "response", "ref": "a5", "ts": "2026-10-05T10:00:05Z", "model": "m", "personas": ["terminologist"], "agents": {"x": "terminologist"},
+             "tools_used": [], "ai_text_flag": False, "answer": "Asking."},
+            {"type": "prompt", "id": "a6", "ts": "2026-10-05T10:01:00Z", "session": "s", "paper": "Testarbeit", "category": "terminology",
+             "origin": "agent", "agent": "terminologist", "replyTo": "a5", "text": "Fair point for psychology; in medicine it is participants."},
+            {"type": "response", "ref": "a6", "ts": "2026-10-05T10:01:05Z", "model": "m", "personas": ["terminologist"],
+             "tools_used": [], "ai_text_flag": False, "answer": "The Terminologist concedes for psychology."},
+        ]
+        with (self.root / "ai-log" / "2026-10.jsonl").open("a", encoding="utf-8") as f:
+            f.write("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in thread))
+        self.assertEqual(run("ailog.py", "prompts", "--lang", "en", "--format", "md", cwd=self.root).returncode, 0)
+        md = self.read("ai-prompts.en.md")
+        self.assertIn("2026-10-05 10:00 · Checks of field-specific terminology · in reply to 2026-10-04 10:00", md)
+        self.assertIn("2026-10-05 10:01 · Checks of field-specific terminology · report from terminologist · in reply to 2026-10-05 10:00", md)
+        self.assertEqual(run("ailog.py", "prompts", "--lang", "de", "--format", "tex", cwd=self.root).returncode, 0)
+        self.assertIn("Antwort auf 2026-10-04 10:00", self.read("ai-prompts.de.tex"))
+
     def test_tool_without_a_paper_explains_itself(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             failed = run("ailog.py", "stats", cwd=Path(empty))

@@ -224,6 +224,8 @@ The pane's **Feedback** tab lists every AI input you still owe a classification:
 
 **Reply** puts a line into the prompt box that addresses the input (the persona's agent, or Claude for its own answer, with the time and the log entry), after anything you had drafted; you type your reply behind it and press Enter. Nothing is sent before that. For a persona, Claude hands the agent its earlier feedback together with your reply, and the persona answers as a colleague in a conversation would: it takes a position, gives reasons, concedes or holds its ground, asks back. No new review, no report template. You can tell it how to weigh things in this paper, and it takes that on for its answer.
 
+The exchange is a **thread** in the log: your reply names the feedback it answers, the persona's answer names your reply. The Feedback tab marks an answer with ↳, the opened answer shows your words and links back to the feedback, the feedback links forward to the answers, and the prompts appendix says "in reply to" with the time. Each answer is AI input like any other and asks for a classification of its own.
+
 **What did I change since?** asks the model what your manuscript's diff shows between that input and now: it takes the autosave commit from just before the input, diffs it to your working copy, and answers in three sentences at most, with the live-review model. It describes, it doesn't judge or classify; you can take the description as your comment, edit it, or ignore it. The call is logged like any AI input, under its own category, and needs no classification of its own. It needs autosave (or your own commits): without a saved version from before the input there is nothing to compare.
 
 ### Live review

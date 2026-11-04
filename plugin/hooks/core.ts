@@ -211,11 +211,12 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
       category,
       preview:
         p.origin === 'agent'
-          ? `↩ report from ${personaById(p.agent ?? '')?.name ?? 'a subagent'}`
+          ? `${p.replyTo !== undefined ? '↳ answer' : '↩ report'} from ${personaById(p.agent ?? '')?.name ?? 'a subagent'}`
           : p.text.replace(/\s+/g, ' ').slice(0, 60),
       answer: flatten(r.answer).slice(0, 240),
       ...(p.agent !== undefined || r.personas[0] !== undefined ? { persona: p.agent ?? r.personas[0] } : {}),
       ...(p.origin !== undefined ? { origin: p.origin } : {}),
+      ...(p.replyTo !== undefined ? { replyTo: p.replyTo } : {}),
       isOpen,
       personas: r.personas,
       isAnnotated: a !== undefined,

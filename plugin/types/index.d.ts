@@ -17,6 +17,11 @@ export type PromptEntry = {
   origin?: 'agent' | 'watch' | 'scope' | 'summary'
   /** for origin 'agent': the persona whose report this is */
   agent?: string
+  /**
+   * the entry this turn answers: on the author's reply, the feedback it replies to; on a persona's
+   * answer, the author's reply. A thread is the chain.
+   */
+  replyTo?: string
   text: string
 }
 
@@ -80,6 +85,8 @@ export type RecentTurn = {
   /** who it came from: the persona, if any */
   persona?: string
   origin?: 'agent' | 'watch' | 'scope' | 'summary'
+  /** the entry this turn answers, when it is part of a reply thread */
+  replyTo?: string
   personas: string[]
   isAnnotated: boolean
   /** waits for the author to classify it: not a live hint, not a mere launch of a reviewer */
@@ -96,6 +103,10 @@ export type Reading = {
   who: string
   /** the persona's agent id, for a reply; '' when Claude itself answered */
   persona: string
+  /** the feedback this input answers, when it is a reply's answer; null for a first input */
+  parent: ThreadLink | null
+  /** the answers the author's replies to this input got, oldest first */
+  replies: ThreadLink[]
   /** what the author asked, or what the turn was */
   asked: string
   /** the whole answer, readable; for a persona's report, the report itself */
@@ -107,6 +118,13 @@ export type Reading = {
   /** what the model read in the manuscript's diff since this turn; '' until asked */
   summary: string
   isSummarizing: boolean
+}
+
+/** Another input in the same thread, as the reading view links it. */
+export type ThreadLink = {
+  id: string
+  who: string
+  ts: string
 }
 
 /** The Log tab's state: the AI input opened whole, or null for the list. */

@@ -736,6 +736,9 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
     fills.push(e.text)
     return { isFilled: true }
   })
+  on('prompt.submit', (_: unknown, e: { text: string }) => ({ text: e.text }))
+  on('turn.complete', (_: unknown, e: { answer: string }) => ({ text: e.answer }))
+  on('agent.spawn', () => ({ model: 'm', agentId: 'agent-9' }))
   mock.clock(on, { now: 1_000_000 })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   const logOf = () => [...files.entries()].filter(([k]) => k.startsWith(`${ROOT}/ai-log/`)).flatMap(([, v]) => parseLog(v))
@@ -770,12 +773,46 @@ test('the Feedback tab and the persona badge lead to the whole input, a comment,
   // a reply starts in the prompt box, addressed to the persona's agent; the author types and sends it
   await ui.press({ key: 'reading-reply' })
   expect(fills[0]).toMatch(/^Reply to The Architect \(the cowrite:architect agent\) on its structure feedback from .*log entry p2\./)
+
+  // the author sends it; Claude launches the Architect again; its answer comes back: a thread in the log
+  await $.prompt.submit({ text: `${fills[0]}Isn't the gap the method's motivation?`, wait: false, origin: { kind: 'composer' } })
+  await $.agent.spawn({
+    tool_use_id: 'tu-9',
+    prompt: 'answer the reply',
+    description: 'structure',
+    subagentType: 'cowrite:architect',
+    provider: { plugin: 'cowrite', tier: 'user' } as never,
+    parentModel: 'm',
+    background: true,
+    fork: false,
+  })
+  await $.turn.complete({ answer: 'The Architect is thinking it over.', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  const answer = '<agent-message from="agent-9">\n[Subagent hand-back] Fair point: then say so in one sentence before the method.\n</agent-message>'
+  await $.prompt.submit({ text: answer, wait: false, origin: { kind: 'task-notification' } as never })
+  await $.turn.complete({ answer: 'The Architect agrees, with one condition.', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' })
+  const authorReply = logOf().find(e => e.type === 'prompt' && e.origin === undefined && e.replyTo !== undefined)
+  const answered = logOf().find(e => e.type === 'prompt' && e.origin === 'agent' && e.replyTo !== undefined)
+  const replyId = authorReply?.type === 'prompt' ? authorReply.id : ''
+  const answerId = answered?.type === 'prompt' ? answered.id : ''
+  expect(authorReply?.type === 'prompt' && authorReply.replyTo).toBe('p2')
+  expect(authorReply?.type === 'prompt' && authorReply.category).toBe('structure')
+  expect(answered?.type === 'prompt' && answered.replyTo).toBe(replyId)
+  // the Feedback tab lists the answer as part of the thread; opened, it links back and shows the author's words
+  await ui.press({ key: 'reading-back' })
+  expect(await ui.find({ type: 'Text', text: /answers your reply/ })).toBeDefined()
+  await ui.press({ key: `open-${answerId}` })
+  expect(await ui.find({ type: 'Text', text: /your reply: Isn't the gap the method's motivation\?/ })).toBeDefined()
+  expect(await ui.find({ key: 'thread-p2' })).toBeDefined()
+  await ui.press({ key: 'thread-p2' })
+  expect(await ui.find({ key: `thread-${answerId}` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /one answer to your reply/ })).toBeDefined()
+
   // what changed since: the autosave commit before the turn, diffed to now, read by the model, and logged
   await ui.press({ key: 'reading-summarize' })
   expect(runs.some(argv => argv[0] === 'git' && argv[1] === 'log' && argv.includes('--before=2026-10-29T08:02:00Z'))).toBe(true)
   expect(await ui.find({ type: 'Markdown', text: /Der Absatz zur Lücke steht jetzt vor der Methode/ })).toBeDefined()
   expect(logOf().filter(e => e.type === 'prompt' && e.origin === 'summary').length).toBe(1)
-  expect(computeStats(logOf(), new Date()).unannotated).toBe(1) // the summary is AI input, but not one the author owes a classification
+  expect(computeStats(logOf(), new Date()).unannotated).toBe(2) // the report and the thread's answer; the summary is AI input, but not one the author owes a classification
 
   // the summary can seed the comment; what the author types is what the annotation takes
   await ui.press({ key: 'reading-use-summary' })

@@ -154,7 +154,8 @@ def cmd_list(root: Path, args) -> None:
         mark = f"✓ {a['use']}" if a else ("· auto" if t["is_auto"] else "· launch" if t["is_launch"] else "• open")
         flag = " [AI-TEXT]" if t["response"].get("ai_text_flag") else ""
         text = f"↩ report from {p.get('agent', 'a subagent')}" if p.get("origin") == "agent" else squash(p.get("text", ""), 70)
-        print(f"{p['id']}  {p['ts'][:16].replace('T', ' ')}  {t['category']:<12} {mark:<11}{flag} {text}")
+        thread = f" ↳ {p['replyTo']}" if p.get("replyTo") else ""
+        print(f"{p['id']}  {p['ts'][:16].replace('T', ' ')}  {t['category']:<12} {mark:<11}{flag} {text}{thread}")
 
 
 def cmd_annotate(root: Path, args) -> None:
@@ -367,6 +368,7 @@ def cmd_prompts(root: Path, args) -> None:
     )
     answer_head = "Antwort" if de else "Answer"
     note_head = "Kommentar" if de else "Comment"
+    when_of = {t["prompt"]["id"]: t["prompt"]["ts"][:16].replace("T", " ") for t in ts}
 
     def heading(t: dict) -> str:
         p, a = t["prompt"], t["annotation"]
@@ -374,8 +376,11 @@ def cmd_prompts(root: Path, args) -> None:
         use = use_labels[a["use"]] if a else use_labels["auto" if t["is_auto"] else "open"]
         chapter = f" ({a['chapter']})" if a and a.get("chapter") else ""
         report = (" · " + ("Bericht von " if de else "report from ") + p.get("agent", "?")) if p.get("origin") == "agent" else ""
+        # a reply thread: the author's reply names the input it answers, the persona's answer names the reply
+        ref = p.get("replyTo")
+        reply = (" · " + ("Antwort auf " if de else "in reply to ") + when_of.get(ref, ref)) if ref else ""
         flag = " · [AI-TEXT]" if t["response"].get("ai_text_flag") else ""
-        return f"{when} · {labels.get(t['category'], t['category'])}{report} · {use}{chapter}{flag}"
+        return f"{when} · {labels.get(t['category'], t['category'])}{report}{reply} · {use}{chapter}{flag}"
 
     if fmt == "md":
         out = [f"# {title}", "", intro, ""]
