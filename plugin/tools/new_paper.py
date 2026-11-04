@@ -189,6 +189,8 @@ def main() -> None:
     parser.add_argument("--project", help="create the paper under projects/<project>/")
     parser.add_argument("--name", help="display name (default: folder or project name)")
     parser.add_argument("--dir", type=Path, help="folder to set up (default: the current folder)")
+    parser.add_argument("--versioning", choices=("git", "none"), default="git",
+                        help="git: a repository, autosave and a history to compare (default); none: nothing is saved automatically")
     parser.add_argument("--upgrade", action="store_true", help="bring an existing paper up to this plugin version")
     parser.add_argument("--apply", action="store_true", help="with --upgrade: make the changes instead of listing them")
     args = parser.parse_args()
@@ -234,9 +236,18 @@ def main() -> None:
             shutil.copy2(src, dst)
         created.append(str(rel))
 
+    # Without git on the machine a paper cannot be versioned, whatever was asked: the note below says so.
+    versioning = args.versioning
+    no_git_here = versioning == "git" and shutil.which("git") is None
+    if no_git_here:
+        versioning = "none"
+
     paper_json = root / "paper.json"
     if not paper_json.exists():
-        paper_json.write_text(json.dumps({"name": name, "format": args.format, "language": args.lang, "party": party}, indent=2) + "\n", encoding="utf-8")
+        paper = {"name": name, "format": args.format, "language": args.lang, "party": party}
+        if versioning == "none":
+            paper["versioning"] = "none"
+        paper_json.write_text(json.dumps(paper, indent=2) + "\n", encoding="utf-8")
         created.append("paper.json")
     else:
         kept.append("paper.json")
@@ -245,11 +256,17 @@ def main() -> None:
         (cwd / ".active-project").write_text(args.project + "\n", encoding="utf-8")
 
     repo = cwd if args.project else root
-    if subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo, capture_output=True).returncode != 0:
+    if versioning == "git" and subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo, capture_output=True).returncode != 0:
         subprocess.run(["git", "init", "-q"], cwd=repo, check=False)
         created.append("(git repository)")
 
     print(f"Paper workspace: {root}")
+    if no_git_here:
+        print("  ! git is not installed, so the paper is set up without versioning: nothing is saved automatically, "
+              "and there is no history to compare. Install git and run /cowrite:paper versioning git to switch it on.")
+    elif versioning == "none":
+        print("  ! without git: nothing is saved automatically, and there is no history to compare. "
+              "/cowrite:paper versioning git switches it on later.")
     for c in created:
         print(f"  + {c}")
     for k in kept:

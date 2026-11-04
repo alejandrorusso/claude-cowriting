@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A paper without git.** `/cowrite:init` now asks whether the paper is versioned with git and explains both choices in the question itself, for authors who have never used git. Without git (`--versioning none`, `"versioning": "none"` in `paper.json`) no repository is created and git is never called: autosave is off for that paper whatever the option says, "What did I change since?" says there is no history to compare, the guard's toast says "check the file", and the pane header says `no git`. The AI log, the party and the disclosure are unchanged. `/cowrite:paper versioning` says which it is; `/cowrite:paper versioning git` creates the repository and switches autosave on, `none` switches it off. A machine without git gets a paper without versioning and a line that says so.
+
 ## 0.3.3 (2026-11-04)
 
 - A **Feedback** tab of its own lists the AI inputs still to classify, with their count in its label, and each persona's card on the Party tab wears a ✉ badge with that persona's count; pressing it opens the newest. Opening an input shows the whole text (for a persona's report, the report itself, then what Claude added), a comment field and the four choices. The comment goes into the annotation and into the prompts appendix under its turn. Before, the Log tab held cards that cut the answer after two lines; the Log tab is the history again.

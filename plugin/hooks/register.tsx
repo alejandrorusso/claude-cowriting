@@ -38,7 +38,7 @@ async function readJson($: Engine, path: string): Promise<any> {
   }
 }
 
-type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave'>> & { domainPack?: string }
+type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave' | 'versioning'>> & { domainPack?: string }
 
 /** The catalogue members of a paper's party: its roster, or for a paper.json from before rosters, the old domain pack's. */
 export const catalogParty = (json: PaperJson): string[] => {
@@ -52,7 +52,9 @@ const asPaper = (root: string, json: PaperJson): Paper => ({
   format: json.format === 'latex' ? 'latex' : 'markdown',
   language: json.language === 'de' ? 'de' : 'en',
   party: [...catalogParty(json), ...customPersonas().filter(p => loadedRoot === root).map(p => p.id)],
-  autosave: json.autosave !== false,
+  // without git there is nothing to commit to: autosave is off whatever the option says
+  autosave: json.autosave !== false && json.versioning !== 'none',
+  versioning: json.versioning === 'none' ? 'none' : 'git',
 })
 
 /** A paper folder chosen with /cowrite:paper <path>; null: the session's folder decides. */
@@ -139,6 +141,38 @@ export async function writeParty($: Engine, root: string, ids: readonly string[]
   const json: (PaperJson & Record<string, unknown>) | undefined = await readJson($, path)
   const { domainPack: _pack, ...rest } = json ?? {}
   await $.fs.write(path, `${JSON.stringify({ ...rest, party: ids }, null, 2)}\n`)
+}
+
+/** Writes the versioning choice into paper.json, keeping everything else in it; git is the default and is left out. */
+async function writeVersioning($: Engine, root: string, mode: 'git' | 'none'): Promise<void> {
+  const path = join(root, 'paper.json')
+  const json: (PaperJson & Record<string, unknown>) | undefined = await readJson($, path)
+  const { versioning: _old, ...rest } = json ?? {}
+  await $.fs.write(path, `${JSON.stringify(mode === 'none' ? { ...rest, versioning: 'none' } : rest, null, 2)}\n`)
+}
+
+/** /cowrite:paper versioning: whether this paper is saved with git; with a mode, the switch. */
+async function setVersioning($: Engine, paper: Paper, mode: 'git' | 'none' | undefined): Promise<string> {
+  const current =
+    paper.versioning === 'none'
+      ? 'This paper is set up without git: nothing is saved automatically, and "What did I change since?" has no history to compare. The AI log and the disclosure work as always.'
+      : paper.autosave
+        ? 'This paper is versioned with git: the manuscript and the AI log are saved after each writing pause, under your git name.'
+        : 'This paper is versioned with git, but autosave is off (the "Autosave to git" option, or "autosave": false in paper.json).'
+  if (mode === undefined) return `${current}\nSwitch with /cowrite:paper versioning git, or /cowrite:paper versioning none.`
+  if (mode === paper.versioning) return current
+  if (mode === 'git') {
+    const inside = await git($, paper, ['rev-parse', '--is-inside-work-tree']).catch(() => null)
+    if (inside === null) return 'git is not installed on this machine, so the paper stays without versioning. Install git (https://git-scm.com) and run this again.'
+    if (inside.exitCode !== 0) {
+      const init = await git($, paper, ['init', '-q']).catch(() => null)
+      if (init === null || init.exitCode !== 0) return `git init failed: ${init?.stderr.trim().slice(0, 100) ?? 'git could not be started'}`
+    }
+  }
+  await writeVersioning($, paper.root, mode)
+  return mode === 'git'
+    ? 'Versioning is on: from the next writing pause on, the manuscript and the AI log are saved after each change, under your git name (git config --global user.name and user.email).'
+    : 'Versioning is off for this paper: nothing is saved automatically from now on, so keep your own backups. /cowrite:paper versioning git switches it back on.'
 }
 
 export async function readLog($: Engine, root: string): Promise<LogEntry[]> {
@@ -476,7 +510,7 @@ export async function autosaveTick($: Engine): Promise<string | null> {
     for (const folder of SAVED) {
       const status = await git($, paper, ['status', '--porcelain', '-z', '-uall', '--', folder])
       if (status.exitCode !== 0) {
-        reportOnce($, 'no-repo', 'CoWriting autosave: the paper folder is not a git repository (run git init there).')
+        reportOnce($, 'no-repo', 'CoWriting autosave: the paper folder is not a git repository. /cowrite:paper versioning git creates one; /cowrite:paper versioning none turns autosave off for this paper.')
         return null
       }
       const found = changedPaths(status.stdout)
@@ -1203,7 +1237,10 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
   const header = (
     <Box flexDirection="column">
       <Text weight="bold">
-        ✍ {paper.name} <Text dimColor>· {paper.format} · {paper.language} · assist-only</Text>
+        ✍ {paper.name}{' '}
+        <Text dimColor>
+          · {paper.format} · {paper.language} · assist-only{paper.versioning === 'none' ? ' · no git' : ''}
+        </Text>
       </Text>
       <Box flexDirection="row">
         {tabs.map((t, i) => (
@@ -1940,6 +1977,11 @@ async function summarizeChanges($: Engine, cfg: Config): Promise<void> {
   const setSummary = async (summary: string, isSummarizing = false): Promise<void> => {
     await update($, readingAtom, s => (s.open === null || s.open.id !== reading.id ? s : { open: { ...s.open, summary, isSummarizing } }))
   }
+  if (paper.versioning === 'none') {
+    return setSummary(
+      'This paper is set up without git, so there is no saved version to compare. /cowrite:paper versioning git switches versioning on; from the next writing pause on, the manuscript is saved after each change.',
+    )
+  }
   await setSummary('', true)
   const before = await git($, paper, ['log', '-1', '--format=%H', `--before=${reading.ts}`, '--', 'manuscript'])
   const sha = before.stdout.trim()
@@ -2000,7 +2042,7 @@ async function reportGuard($: Engine, cfg: Config, paper: Paper, tool: string, i
     input,
     files,
   }).catch(() => undefined)
-  $.ui.toast(`⚠ ${files.join(', ')} changed while ${tool} ran. Logged; check git diff.`)
+  $.ui.toast(`⚠ ${files.join(', ')} changed while ${tool} ran. Logged; ${paper.versioning === 'none' ? 'check the file' : 'check git diff'}.`)
   await update($, bandHiddenAtom, () => false)
   await refresh($, cfg).catch(() => undefined)
 }
@@ -2252,6 +2294,15 @@ export const register: Register = (on, options) => {
       if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
       const text = await upgradePaper($, paper.root, upgrade[1] !== undefined)
       if (upgrade[1] !== undefined) await refresh($, cfg)
+      return { text }
+    }
+    // /cowrite:paper versioning [git|none]: whether this paper is saved with git, and the switch
+    const versioning = /^versioning(?:\s+(git|none))?$/.exec(arg)
+    if (versioning !== null) {
+      const paper = await findPaper($)
+      if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
+      const text = await setVersioning($, paper, versioning[1] === 'git' || versioning[1] === 'none' ? versioning[1] : undefined)
+      await refresh($, cfg)
       return { text }
     }
     const text = await openPaper($, arg)

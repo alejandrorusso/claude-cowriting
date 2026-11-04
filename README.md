@@ -72,11 +72,12 @@ Open your writing folder in VS Code (or a terminal), start Claude Code, and run:
 
 Claude Code runs somewhere else, e.g. in your home folder? Give the paper's folder: `/cowrite:init ~/Papers/my-thesis` sets it up there. Later, `/cowrite:paper ~/Papers/my-thesis` opens it again from anywhere, and `/cowrite:paper` alone lists your recent papers to pick by number. If the folder already holds your draft (say `paper.md`), move it into `manuscript/` yourself afterwards; Claude never touches that folder.
 
-Claude asks four questions:
+Claude asks five questions:
 - LaTeX or Markdown
 - English or German
 - this folder or a new `projects/<name>/` (for several papers in one folder)
 - who joins your review party: the nine general personas, The Clinician for medical texts, and any expert of your own (an ontologist, a general practitioner, a neurologist, a lawyer: whoever your field needs). Claude interviews you about each expert you ask for and writes it down as `party/<id>.md`.
+- with or without git. Claude explains both right there: with git, your manuscript and the AI log are saved after each writing pause and the history shows how your text grew; without git, nothing is saved automatically and you keep your own backups. Everything else works the same either way (see below).
 
 You get:
 
@@ -93,6 +94,8 @@ paper.json, CLAUDE.md, .vscode/ (recommended extensions), .claude/settings.json
 ```
 
 CoWriting commits your manuscript and the AI log for you after each change (once you pause for 30 s). The git history then documents how your text grew and which AI input came before each step, and with it your authorship. The commits use your own git name (`git config --global user.name` / `user.email`) and contain only `manuscript/` and `ai-log/`. Commit the rest (literature, notes) yourself when you like. Switch it off with the *Autosave to git* option, or for one paper with `"autosave": false` in its `paper.json`.
+
+**Never used git?** You don't have to. Choose *without git* at setup (or run `/cowrite:paper versioning none` later) and the paper is set up with no repository: nothing is saved automatically, so keep your own backups and versions as you do today. The review party, the AI log and the disclosure work exactly the same. Two things need the history and tell you so when it's missing: the pane's "What did I change since?" button, which compares your text with the version from before a piece of feedback, and the word counts in the autosave messages. The pane header says `no git` for such a paper. We recommend git all the same, because the history is the best evidence of your own authorship: `/cowrite:paper versioning git` switches it on at any time, and if git isn't installed yet, [git-scm.com](https://git-scm.com) has it for every system.
 
 **Writing in Word or LibreOffice?** Put the `.docx` or `.odt` in `manuscript/` as you would a `.tex` file. The party reads it as text through [pandoc](https://pandoc.org) (install it: `brew install pandoc`, `apt install pandoc`, or the Windows installer), the word count and the live review use the same conversion, and the guard protects the file like any other. Two limits: `Grep` cannot search inside such a file, so a persona reads it whole, and located feedback names the line of the converted text, not a page. Without pandoc the file is unreadable to Claude, and the pane's word count stays at the text files.
 

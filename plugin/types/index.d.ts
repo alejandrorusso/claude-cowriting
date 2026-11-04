@@ -166,6 +166,8 @@ export type Paper = {
   party: string[]
   /** false in paper.json: this paper is never autosaved (e.g. a demo inside another repository) */
   autosave: boolean
+  /** 'none': the paper is set up without git, so nothing is saved automatically and there is no history to compare */
+  versioning: 'git' | 'none'
 }
 
 export type Snapshot = {

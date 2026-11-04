@@ -102,6 +102,19 @@ class PaperWorkspace(unittest.TestCase):
             self.assertNotEqual(wrong.returncode, 0)
             self.assertIn("not in the catalogue: doctor", wrong.stderr)
 
+    def test_a_paper_can_be_set_up_without_git(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run("new_paper.py", "--format", "markdown", "--versioning", "none", "--dir", tmp, cwd=Path(tmp))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("without git: nothing is saved automatically", done.stdout)
+            self.assertFalse((Path(tmp) / ".git").exists(), "no repository is created")
+            paper = json.loads((Path(tmp) / "paper.json").read_text(encoding="utf-8"))
+            self.assertEqual(paper["versioning"], "none")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run("new_paper.py", "--format", "markdown", "--dir", tmp, cwd=Path(tmp))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertNotIn("versioning", json.loads((Path(tmp) / "paper.json").read_text(encoding="utf-8")), "git is the default and is left out")
+
     def test_settings_keep_claude_out_of_the_authors_files(self) -> None:
         text = (self.root / ".claude" / "settings.json").read_text(encoding="utf-8")
         self.assertNotIn("{{", text, "every placeholder is filled")

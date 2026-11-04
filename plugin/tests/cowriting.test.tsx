@@ -1242,6 +1242,45 @@ test('autosave commits the manuscript and the AI log after a writing pause, and 
   expect(runs.find(r => r[1] === 'add')).toEqual(['git', 'add', '-A', '--', 'manuscript', 'ai-log'])
 })
 
+test('a paper without git: nothing is saved, the pane says so, and /cowrite:paper versioning switches it', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/paper.json`, JSON.stringify({ name: 'demo', format: 'latex', language: 'de', party: ['architect'], versioning: 'none' }))
+  workspace(on, files)
+  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1_000_000, isLink: false } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_: unknown, e: { argv: readonly string[] }) => {
+    runs.push(e.argv)
+    const isInside = e.argv[1] === 'rev-parse'
+    return { value: { exitCode: isInside ? 128 : 0, stdout: '', stderr: isInside ? 'not a git repository' : '' } as never }
+  })
+  const clock = mock.clock(on, { now: 1_000_000 })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+
+  await clock.advance(60_000)
+  expect(runs.some(r => r[0] === 'git')).toBe(false) // nothing is saved, and git is never called
+
+  const ui = await $.ui.mount({
+    plugin: 'cowrite',
+    component: 'Pane',
+    requestId: 'cowriting',
+    surface: 'terminal',
+    props: { title: 'CoWriting', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: /no git/ })).toBeDefined()
+  await ui.unmount()
+
+  const asked = await $.command.run({ command: 'cowrite:paper', args: 'versioning', origin: { kind: 'composer' }, presentation })
+  expect(asked.text).toContain('without git')
+  const switchedOn = await $.command.run({ command: 'cowrite:paper', args: 'versioning git', origin: { kind: 'composer' }, presentation })
+  expect(switchedOn.text).toContain('Versioning is on')
+  expect(runs.some(r => r[0] === 'git' && r[1] === 'init')).toBe(true)
+  expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).versioning).toBeUndefined()
+  const switchedOff = await $.command.run({ command: 'cowrite:paper', args: 'versioning none', origin: { kind: 'composer' }, presentation })
+  expect(switchedOff.text).toContain('Versioning is off')
+  expect(JSON.parse(files.get(`${ROOT}/paper.json`)!).versioning).toBe('none')
+})
+
 const SCOPE = `# Scope
 <!-- comment -->
 ## Goal
