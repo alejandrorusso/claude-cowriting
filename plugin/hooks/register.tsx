@@ -1999,7 +1999,7 @@ async function refresh($: Engine, cfg: Config, isTurnEnd = false, lastWasAiText 
 async function showStatus($: Engine, cfg: Config): Promise<void> {
   const { paper, progress, stats, scope } = await read($, snapshotAtom)
   if (paper === null) return $.ui.status(undefined)
-  const parts = [`✍ ${paper.name}`, 'assist-only']
+  const parts = [`✍ ${paper.name}`, paper.mode === 'edit' ? 'edit mode' : 'assist-only']
   if (scope !== null) parts.push(`🎯 ${Math.round(scope.overall * 100)} %`)
   if (progress !== null) parts.push(`Lv${progress.level}`)
   if (stats.unannotated > 0) parts.push(`${stats.unannotated} to classify`)

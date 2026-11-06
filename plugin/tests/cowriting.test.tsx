@@ -463,6 +463,31 @@ test('edit mode: file tools may edit the manuscript, logged as edits; the rest s
   expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/notes/ai/manuscript/x.md`, content: 'x' })).deny).toContain('CoWriting')
 })
 
+test('edit mode also holds for a paper opened with /cowrite:paper from a parent folder', async ($, on) => {
+  const paper = `${ROOT}/paper`
+  const main = `${paper}/manuscript/main.tex`
+  const files = new Map<string, string>([
+    [`${paper}/paper.json`, JSON.stringify({ name: 'paper', format: 'latex', language: 'en', party: ['architect'], mode: 'edit' })],
+    [main, '\\section{Intro}\nText.'],
+  ])
+  workspace(on, files)
+  on('fs.stat', (_: unknown, e: { path: string }) => {
+    const isFile = files.has(e.path)
+    const isDir = [...files.keys()].some(k => k.startsWith(`${e.path}/`))
+    if (!isFile && !isDir) throw new Error(`ENOENT ${e.path}`)
+    return { value: { kind: isFile ? 'file' : 'dir', size: files.get(e.path)?.length ?? 0, mtimeMs: 1, isLink: false } }
+  })
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const presentation = { isFullscreen: false, columns: 100 } as never
+  const opened = await $.command.run({ command: 'cowrite:paper', args: paper, origin: { kind: 'composer' }, presentation })
+  expect(JSON.stringify(opened)).toContain('Active paper')
+  const mode = await $.command.run({ command: 'cowrite:paper', args: 'mode', origin: { kind: 'composer' }, presentation })
+  expect(JSON.stringify(mode)).toContain('edit mode')
+  const polish = await $.tool.call({ tool: 'Edit', file_path: main, old_string: 'Text.', new_string: 'Text, polished.' })
+  expect(polish.deny).toBeUndefined()
+})
+
 test('assist mode still refuses file tools in the manuscript', async ($, on) => {
   workspace(on, paperFiles())
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
