@@ -14,6 +14,7 @@ import {
   categoryFor,
   changedFiles,
   changedParagraphs,
+  isBuildOutput,
   changedPaths,
   computeStats,
   countWords,
@@ -48,8 +49,8 @@ const ROOT = '/w'
 const registered: { name: string; prompt: string; tools: string[] }[] = []
 
 // An in-memory workspace answering the plugin's $.fs and $.session calls.
-const workspace = (on: any, files: Map<string, string>) => {
-  on('session.cwd', () => ({ value: ROOT }))
+const workspace = (on: any, files: Map<string, string>, cwd: () => string = () => ROOT) => {
+  on('session.cwd', () => ({ value: cwd() }))
   on('session.id', () => ({ value: 'session-1' }))
   on('fs.exists', (_: unknown, e: { path: string }) => ({
     value: files.has(e.path) || [...files.keys()].some(k => k.startsWith(`${e.path}/`)),
@@ -182,6 +183,8 @@ test('inside a paper, everything but Claude\'s own places is the author\'s', asy
     "sed -i '' 's/a/b/' paper.json",
     'python3 x.py > /w/literature/out.bib',
     'cp literature/a.pdf /tmp/', // the pattern cannot tell a source from a target: read the file instead
+    "cat <<'EOF' > CLAUDE.md\nnew rules\nEOF", // the redirect on a here-document's opening line still counts
+    "git commit -F - <<'EOF'\nmsg\n EOF-not-the-end\necho x > CLAUDE.md", // an unclosed one is read whole
   ]
   for (const command of denied) expect(bashWritesTo(command, isAuthors, names), command).toBe(true)
   const allowed = [
@@ -191,12 +194,21 @@ test('inside a paper, everything but Claude\'s own places is the author\'s', asy
     'git log -- literature',
     'echo x > scope.md',
     'latexmk -outdir=build manuscript/main.tex > /dev/null',
+    // a commit message in a here-document is data: its `->` and words are no redirect or command
+    "git add manuscript/main.tex ai-log/2026-11.jsonl && git commit -q -F - <<'EOF'\nWriting: main.tex (-2 words)\n\nmanuscript/main.tex: 1234 -> 1232 words, rm the \\revision macros\nEOF",
   ]
   for (const command of allowed) expect(bashWritesTo(command, isAuthors, names), command).toBe(false)
+  expect(bashTouchesManuscript(allowed.at(-1)!)).toBe(false)
   // what the text cannot show is left to the comparison after the call
   expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '2:12' })).toEqual(['manuscript/main.tex'])
   expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '1:10', 'manuscript/new.tex': '3:1' })).toEqual(['manuscript/new.tex'])
   expect(changedFiles({ 'manuscript/main.tex': '1:10' }, { 'manuscript/main.tex': '1:10' })).toEqual([])
+  // what a LaTeX build writes is no one's text; a figure PDF is
+  const tree = { 'manuscript/main.tex': '1', 'manuscript/main.pdf': '1', 'manuscript/figures/plot.pdf': '1' }
+  for (const out of ['manuscript/main.log', 'manuscript/main.fls', 'manuscript/main.aux', 'manuscript/main.synctex.gz', 'manuscript/main.pdf']) {
+    expect(isBuildOutput(out, tree), out).toBe(true)
+  }
+  for (const own of ['manuscript/main.tex', 'manuscript/figures/plot.pdf', 'manuscript/refs.bib']) expect(isBuildOutput(own, tree), own).toBe(false)
 })
 
 test('words are counted without LaTeX and Markdown syntax', async () => {
@@ -408,6 +420,10 @@ test('edit mode: the pure parts of the guard', async () => {
   expect(stats.editEvents).toBe(2)
   expect(stats.aiEditWords).toBe(120) // what was cut earns nothing back
   expect(stats.guardEvents).toBe(0)
+  // a guard entry that named only build files, logged before they were left out, raises no alarm
+  const guard = (files: string[]) => ({ type: 'guard', ts: '2026-11-01T10:02:00Z', session: 's', paper: 'p', tool: 'Edit', input: 'm', files })
+  const old = computeStats([guard(['manuscript/main.fls', 'manuscript/main.log']), guard(['manuscript/main.log', 'manuscript/main.tex'])] as never, new Date('2026-11-01T12:00:00Z'))
+  expect(old.guardEvents).toBe(1)
   // the author grew the text from 1000 to 1500 words; 120 of them were Claude's
   const progress = advanceGame({ ...NEW_GAME, baselineWords: 1000, maxWords: 1000 }, 1500, stats, '2026-11-01')
   expect(progress.ownWords).toBe(380)
@@ -427,6 +443,12 @@ test('edit mode: file tools may edit the manuscript, logged as edits; the rest s
     if (e.tool === 'Edit' && e.file_path === main) {
       files.set(main, `${files.get(main)}\n${e.new_string}`)
       mtimes.set(main, (mtimes.get(main) ?? 0) + 1)
+      // the editor's continuous compile rewrites the build files meanwhile
+      for (const out of ['main.log', 'main.fls', 'main.aux', 'main.pdf']) {
+        const path = `${ROOT}/manuscript/${out}`
+        files.set(path, `${files.get(path) ?? ''}x`)
+        mtimes.set(path, (mtimes.get(path) ?? 0) + 1)
+      }
     }
     return { result: {} }
   })
@@ -466,6 +488,21 @@ test('edit mode: file tools may edit the manuscript, logged as edits; the rest s
   expect((await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/literature/references.bib`, old_string: 'x', new_string: 'y' })).deny).toContain('references.bib')
   expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/paper.json`, content: '{}' })).deny).toContain('paper.json')
   expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/notes/ai/manuscript/x.md`, content: 'x' })).deny).toContain('CoWriting')
+})
+
+test('edit mode holds after a cd into manuscript/: the paper is found in a parent folder', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/paper.json`, JSON.stringify({ name: 'demo', format: 'latex', language: 'en', party: ['architect'], mode: 'edit' }))
+  const main = `${ROOT}/manuscript/main.tex`
+  let cwd = ROOT
+  workspace(on, files, () => cwd)
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  cwd = `${ROOT}/manuscript` // Claude ran `cd manuscript && grep …`
+  const polish = await $.tool.call({ tool: 'Edit', file_path: main, old_string: 'Text', new_string: 'Text, polished' })
+  expect(polish.deny).toBeUndefined()
+  // the author's other files stay closed from there too
+  expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/paper.json`, content: '{}' })).deny).toContain('paper.json')
 })
 
 test('edit mode also holds for a paper opened with /cowrite:paper from a parent folder', async ($, on) => {

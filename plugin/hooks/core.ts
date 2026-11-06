@@ -220,7 +220,8 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
     if (e.type === 'prompt') prompts.set(e.id, e)
     else if (e.type === 'response') responses.set(e.ref, e)
     else if (e.type === 'annotation') annotated.set(e.ref, e)
-    else if (e.type === 'guard') guardEvents += 1
+    // an entry that names only build files (logged before they were left out) is no change to the text
+    else if (e.type === 'guard') guardEvents += e.files.length > 0 && e.files.every(f => BUILD_FILE.test(f)) ? 0 : 1
     else if (e.type === 'edit') {
       editEvents += 1
       aiEditWords += Math.max(0, e.words)
@@ -402,6 +403,14 @@ export const dropsAiTextMarker = (before: string, after: string): boolean => mar
 export const EDIT_MARKER_MESSAGE =
   `CoWriting: this edit would remove an ${AI_TEXT_MARKER} marker. Only the author removes one, once they have reviewed the passage and made it their own; keep the marker in your edit.`
 
+/**
+ * The command without the bodies of its here-documents (`<<'EOF'` … `EOF`): they are data, such as
+ * a commit message, so a `->` or a word like `rm` in them is not a redirect or a command. The line
+ * that opens one stays, with any redirect on it (`cat <<EOF > file`). An unclosed one is kept whole.
+ */
+export const withoutHeredocBodies = (command: string): string =>
+  command.replace(/(<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2[^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g, '$1')
+
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
@@ -411,7 +420,8 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  * longer word or a search pattern). A variable or a script hiding the path gets past this; the
  * after-the-fact comparison (`changedFiles`) is for those.
  */
-export const bashWritesTo = (command: string, isTarget: (path: string) => boolean, names: readonly string[]): boolean => {
+export const bashWritesTo = (whole: string, isTarget: (path: string) => boolean, names: readonly string[]): boolean => {
+  const command = withoutHeredocBodies(whole)
   const targets = [...command.matchAll(REDIRECT)].map(m => m[1]!)
   if (targets.some(isTarget)) return true
   const enters = [...command.matchAll(CD)].some(m => isTarget(m[1]!))
@@ -499,6 +509,19 @@ export type Fingerprint = Readonly<Record<string, string>>
 /** The files that differ between two fingerprints: changed, added or removed. */
 export const changedFiles = (before: Fingerprint, after: Fingerprint): string[] =>
   [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(f => before[f] !== after[f]).sort()
+
+const BUILD_FILE = /\.(aux|bbl|bcf|blg|fdb_latexmk|fls|log|out|run\.xml|synctex(\.gz)?|toc|lof|lot|nav|snm|vrb|xdv|dvi|bak\d*)$/i
+
+/**
+ * Is this file what a LaTeX build writes, not text? An editor's continuous compile rewrites these
+ * whenever a .tex file is saved, so a change to one says nothing about who wrote what. A PDF counts
+ * only beside a .tex file of the same name (`main.pdf` next to `main.tex`); a figure stays watched.
+ */
+export const isBuildOutput = (file: string, files: Fingerprint): boolean => {
+  if (BUILD_FILE.test(file)) return true
+  const stem = /^(.*)\.pdf$/i.exec(file)?.[1]
+  return stem !== undefined && Object.keys(files).some(f => f.toLowerCase() === `${stem}.tex`.toLowerCase())
+}
 
 /** Tools that only read; the manuscript is not compared around them. */
 export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([

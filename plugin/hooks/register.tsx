@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PaperMode, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, dropsAiTextMarker, EDIT_MARKER_MESSAGE, EDIT_SHELL_MESSAGE, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, newTextOf, oldTextOf, overrelianceNudge, parseBriefs, parseHints, paperManuscriptFileOf, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, dropsAiTextMarker, EDIT_MARKER_MESSAGE, EDIT_SHELL_MESSAGE, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isBuildOutput, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, newTextOf, oldTextOf, overrelianceNudge, parseBriefs, parseHints, paperManuscriptFileOf, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -72,18 +72,22 @@ export async function findPaper($: Engine): Promise<Paper | null> {
     const json: PaperJson | undefined = await readJson($, join(chosen, 'paper.json'))
     if (json !== undefined) return asPaper(chosen, json)
   }
-  const cwd = await $.session.cwd()
-  const here: PaperJson | undefined = await readJson($, join(cwd, 'paper.json'))
-  if (here !== undefined) return asPaper(cwd, here)
+  // the session's folder follows a `cd` (into manuscript/, say), so look in it and then upwards
+  for (let dir = await $.session.cwd(); ; ) {
+    const here: PaperJson | undefined = await readJson($, join(dir, 'paper.json'))
+    if (here !== undefined) return asPaper(dir, here)
 
-  const marker = join(cwd, '.active-project')
-  if (await $.fs.exists(marker)) {
-    const name = (await $.fs.read(marker)).trim()
-    const root = join(cwd, 'projects', name)
-    const json: PaperJson | undefined = await readJson($, join(root, 'paper.json'))
-    if (json !== undefined) return asPaper(root, json)
+    const marker = join(dir, '.active-project')
+    if (await $.fs.exists(marker)) {
+      const name = (await $.fs.read(marker)).trim()
+      const root = join(dir, 'projects', name)
+      const json: PaperJson | undefined = await readJson($, join(root, 'paper.json'))
+      if (json !== undefined) return asPaper(root, json)
+    }
+    const parent = dir.replace(/[\\/][^\\/]*$/, '') || '/'
+    if (parent === dir) return null
+    dir = parent
   }
-  return null
 }
 
 // ---------------------------------------------------------------- the party
@@ -2879,7 +2883,8 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (before === null) return result
     const after = await fingerprintAuthorFiles($, paper).catch(() => null)
-    const files = after === null ? [] : changedFiles(before, after)
+    // build output an editor's compile rewrites meanwhile is not the author's text
+    const files = after === null ? [] : changedFiles(before, after).filter(f => !isBuildOutput(f, { ...before, ...after }))
     // the file an allowed edit named is an edit; any other change is a guard event, as always
     const edited = editing === null ? [] : files.filter(f => f.toLowerCase() === editing.toLowerCase())
     const others = files.filter(f => !edited.includes(f))
