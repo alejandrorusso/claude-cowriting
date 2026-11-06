@@ -269,6 +269,75 @@ class PaperWorkspace(unittest.TestCase):
         self.assertNotIn("references.bib", text)
         self.assertNotIn("CLAUDE.md", text)
 
+    # ------------------------------------------------------------ edit mode
+
+    def test_edit_mode_lifts_only_the_manuscript_rules_and_switches_back(self) -> None:
+        (self.root / "CLAUDE.md").write_text("my own rules", encoding="utf-8")
+        done = run("new_paper.py", "--set-mode", "edit", "--dir", str(self.root), cwd=self.root)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("~ paper.json: mode edit", done.stdout)
+        self.assertEqual(json.loads((self.root / "paper.json").read_text(encoding="utf-8"))["mode"], "edit")
+        settings = json.loads((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        deny, paths = settings["permissions"]["deny"], settings["sandbox"]["filesystem"]["denyWrite"]
+        self.assertFalse([r for r in deny + paths if "manuscript" in r], "edit mode lifts every manuscript rule")
+        for rule in ("Edit(literature/**)", "Edit(CLAUDE.md)", "Edit(paper.json)", "Edit(.claude/**)"):
+            self.assertIn(rule, deny, "the author's other files stay theirs")
+        for path in ("./literature", "./paper.json", "./.claude"):
+            self.assertIn(path, paths)
+        rules = (self.root / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("(edit mode)", rules)
+        self.assertIn("[AI-TEXT]", rules)
+        self.assertNotIn("{{", rules)
+        kept = list((self.root / ".cowriting" / "upgrade").glob("*/CLAUDE.md"))
+        self.assertEqual([k.read_text(encoding="utf-8") for k in kept], ["my own rules"], "the author's copy is kept")
+
+        # an upgrade in edit mode neither restores the manuscript rules nor the assist-only CLAUDE.md
+        up = run("new_paper.py", "--upgrade", "--dir", str(self.root), cwd=self.root)
+        self.assertIn("nothing to do", up.stdout)
+
+        back = run("new_paper.py", "--set-mode", "assist", "--dir", str(self.root), cwd=self.root)
+        self.assertEqual(back.returncode, 0, back.stderr)
+        self.assertNotIn("mode", json.loads((self.root / "paper.json").read_text(encoding="utf-8")), "assist is the default and is left out")
+        settings = json.loads((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertIn("Edit(manuscript/**)", settings["permissions"]["deny"])
+        self.assertIn("./manuscript", settings["sandbox"]["filesystem"]["denyWrite"])
+        self.assertNotIn("(edit mode)", (self.root / "CLAUDE.md").read_text(encoding="utf-8"))
+        again = run("new_paper.py", "--set-mode", "assist", "--dir", str(self.root), cwd=self.root)
+        self.assertIn("already in assist mode", again.stdout)
+
+    def test_a_paper_can_start_in_edit_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            done = run("new_paper.py", "--format", "markdown", "--mode", "edit", "--dir", tmp, cwd=Path(tmp))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(json.loads((Path(tmp) / "paper.json").read_text(encoding="utf-8"))["mode"], "edit")
+            settings = json.loads((Path(tmp) / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            self.assertNotIn("Edit(manuscript/**)", settings["permissions"]["deny"])
+            self.assertIn("(edit mode)", (Path(tmp) / "CLAUDE.md").read_text(encoding="utf-8"))
+
+    def test_disclosure_declares_edit_mode_and_lists_every_edit(self) -> None:
+        log = self.root / "ai-log" / "2026-10.jsonl"
+        polish = {"type": "edit", "ts": "2026-10-08T10:00:00Z", "session": "s", "paper": "Testarbeit", "tool": "Edit",
+                  "input": "manuscript/main.tex", "files": ["manuscript/main.tex"], "words": 0, "ai_text": False}
+        bullets = {"type": "edit", "ts": "2026-10-09T10:00:00Z", "session": "s", "paper": "Testarbeit", "tool": "Edit",
+                   "input": "manuscript/main.tex", "files": ["manuscript/main.tex"], "words": 120, "ai_text": True}
+        log.write_text("".join(json.dumps(e) + "\n" for e in FIXTURE + [polish, bullets]), encoding="utf-8")
+        stats = run("ailog.py", "stats", cwd=self.root)
+        self.assertIn("manuscript edits by Claude (edit mode): 2", stats.stdout)
+        run("ailog.py", "disclosure", cwd=self.root)
+        text = self.read("ai-register.en.md")
+        self.assertIn("in the plugin's edit mode", text)
+        self.assertNotIn("in an assisting role only", text, "an edited manuscript is not declared as assisted only")
+        self.assertIn("## Manuscript edits by the AI (edit mode)\n\n- 2026-10-08: manuscript/main.tex\n"
+                      "- 2026-10-09: manuscript/main.tex (+120 words, [AI-TEXT])\n", text)
+        run("ailog.py", "disclosure", "--lang", "de", "--format", "tex", cwd=self.root)
+        tex = self.read("ai-register.de.tex")
+        self.assertIn("\\subsection*{Änderungen der KI am Manuskript (Bearbeitungsmodus)}", tex)
+        self.assertEqual(tex.count("\\begin{itemize}"), tex.count("\\end{itemize}"))
+
+    def test_an_assist_paper_without_edits_has_no_edit_section(self) -> None:
+        run("ailog.py", "disclosure", cwd=self.root)
+        self.assertNotIn("edit mode", self.read("ai-register.en.md"))
+
     def test_prompts_appendix_lists_every_input_in_order(self) -> None:
         self.assertEqual(run("ailog.py", "prompts", "--lang", "de", "--format", "md", "--answers", cwd=self.root).returncode, 0)
         md = self.read("ai-prompts.de.md")

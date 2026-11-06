@@ -74,7 +74,29 @@ export type GuardEntry = {
   files: string[]
 }
 
-export type LogEntry = PromptEntry | ResponseEntry | AnnotationEntry | GuardEntry
+/**
+ * A manuscript file Claude changed with a file tool in a paper in edit mode: allowed, and
+ * logged so the disclosure can list it.
+ */
+export type EditEntry = {
+  type: 'edit'
+  ts: string
+  session: string
+  paper: string
+  /** the turn the tool call belonged to, if one was open */
+  ref?: string
+  tool: string
+  /** the file argument, shortened */
+  input: string
+  /** manuscript files the call changed, relative to the paper folder */
+  files: string[]
+  /** words the manuscript gained in this call (negative: lost) */
+  words: number
+  /** the new text carries the [AI-TEXT] marker */
+  ai_text: boolean
+}
+
+export type LogEntry = PromptEntry | ResponseEntry | AnnotationEntry | GuardEntry | EditEntry
 
 export type RecentTurn = {
   id: string
@@ -158,6 +180,10 @@ export type Stats = {
   rejected: number
   /** manuscript changes detected during Claude's tool calls (guard entries) */
   guardEvents: number
+  /** manuscript edits Claude made in edit mode (edit entries) */
+  editEvents: number
+  /** words Claude's edits added to the manuscript; they earn the author no writer XP */
+  aiEditWords: number
   recent: RecentTurn[]
   /** turns waiting to be classified, newest first (at most 5) */
   open: RecentTurn[]
@@ -201,7 +227,15 @@ export type Paper = {
   autosave: boolean
   /** 'none': the paper is set up without git, so nothing is saved automatically and there is no history to compare */
   versioning: 'git' | 'none'
+  /**
+   * 'assist' (default): Claude never writes the manuscript. 'edit': the author lets Claude edit
+   * manuscript files for formatting, language polish and turning the author's bullet points into
+   * prose; anything beyond that carries [AI-TEXT]. Every edit is logged and disclosed.
+   */
+  mode: PaperMode
 }
+
+export type PaperMode = 'assist' | 'edit'
 
 export type Snapshot = {
   paper: Paper | null

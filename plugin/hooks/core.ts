@@ -90,6 +90,8 @@ export const EMPTY_STATS: Stats = {
   annotations: 0,
   rejected: 0,
   guardEvents: 0,
+  editEvents: 0,
+  aiEditWords: 0,
   recent: [],
   open: [],
   openByPersona: {},
@@ -212,15 +214,21 @@ export const computeStats = (entries: readonly LogEntry[], now: Date): Stats => 
   const responses = new Map<string, ResponseEntry>()
   const annotated = new Map<string, AnnotationEntry>()
   let guardEvents = 0
+  let editEvents = 0
+  let aiEditWords = 0
   for (const e of entries) {
     if (e.type === 'prompt') prompts.set(e.id, e)
     else if (e.type === 'response') responses.set(e.ref, e)
     else if (e.type === 'annotation') annotated.set(e.ref, e)
     else if (e.type === 'guard') guardEvents += 1
+    else if (e.type === 'edit') {
+      editEvents += 1
+      aiEditWords += Math.max(0, e.words)
+    }
   }
 
   const day = now.toISOString().slice(0, 10)
-  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [], openByPersona: {}, guardEvents }
+  const stats: Stats = { ...EMPTY_STATS, byCategory: {}, personaConsults: {}, personaAdopted: {}, recent: [], open: [], openByPersona: {}, guardEvents, editEvents, aiEditWords }
   const turns: RecentTurn[] = []
 
   for (const [id, p] of prompts) {
@@ -362,6 +370,37 @@ export const authorFileOf = (path: string, root: string): string | null => {
   const rel = segs.slice(base.length)
   return isClaudesPlace(rel) ? null : rel.join('/')
 }
+
+/**
+ * The manuscript file of this paper the path names (`manuscript/…`, relative to the root), or null.
+ * In edit mode these are the only author's files Claude may change, and only with a file tool.
+ */
+export const paperManuscriptFileOf = (path: string, root: string): string | null => {
+  const rel = authorFileOf(path, root)
+  return rel !== null && /^manuscript\/[^/]/i.test(rel) ? rel : null
+}
+
+/** The new text a file tool's call writes: what is checked for the [AI-TEXT] marker. */
+export const newTextOf = (input: Readonly<Record<string, unknown>>): string => {
+  const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
+  return [input.content, input.new_string, input.new_source, ...edits.map(x => x?.new_string)]
+    .filter((x): x is string => typeof x === 'string')
+    .join('\n')
+}
+
+/** The text a file tool's call replaces, when the call itself names it (Edit, MultiEdit). */
+export const oldTextOf = (input: Readonly<Record<string, unknown>>): string => {
+  const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
+  return [input.old_string, ...edits.map(x => x?.old_string)].filter((x): x is string => typeof x === 'string').join('\n')
+}
+
+const markers = (text: string) => text.split(AI_TEXT_MARKER).length - 1
+
+/** Would replacing `before` with `after` drop an [AI-TEXT] marker? Only the author takes one out. */
+export const dropsAiTextMarker = (before: string, after: string): boolean => markers(after) < markers(before)
+
+export const EDIT_MARKER_MESSAGE =
+  `CoWriting: this edit would remove an ${AI_TEXT_MARKER} marker. Only the author removes one, once they have reviewed the passage and made it their own; keep the marker in your edit.`
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -534,7 +573,8 @@ export const streakOf = (days: readonly string[], today: string): number => {
 /**
  * Advance the game by what is observed now. Only growth of the manuscript
  * above its highest count so far earns writer XP, so deleting and retyping
- * earns nothing; AI turns themselves earn nothing.
+ * earns nothing; AI turns themselves earn nothing, and the words Claude's
+ * edits added (edit mode) are taken off the author's own words.
  */
 export const advanceGame = (
   previous: GameFile,
@@ -552,7 +592,7 @@ export const advanceGame = (
   }
   game.writingDays = game.writingDays.slice(-400)
 
-  const ownWords = game.maxWords - (game.baselineWords ?? 0)
+  const ownWords = Math.max(0, game.maxWords - (game.baselineWords ?? 0) - stats.aiEditWords)
   const writerXp = Math.floor(ownWords / 10)
   const integrityXp = stats.annotations * 5 + game.verifiedRefs * 2 + game.disclosures * 20
   const xp = writerXp + integrityXp
@@ -851,16 +891,25 @@ export type FileChange = { file: string; before: number; after: number }
 /**
  * One autosave commit's message: the manuscript files with the words gained
  * and lost, and how many entries the AI log gained (null: the log is unchanged).
+ * `aiEdits`: how many of those entries are edits Claude made in edit mode, so the
+ * commit, made under the author's name, does not pass them off as the author's text.
  */
-export const autosaveMessage = (changes: readonly FileChange[], logEntries: number | null = null): string => {
+export const autosaveMessage = (changes: readonly FileChange[], logEntries: number | null = null, aiEdits = 0): string => {
   const log = logEntries === null ? '' : logEntries > 0 ? `AI log +${logEntries} ${logEntries === 1 ? 'entry' : 'entries'}` : 'AI log updated'
+  const edits = aiEdits > 0 ? `${aiEdits} ${aiEdits === 1 ? 'edit' : 'edits'} by Claude` : ''
   const lines = changes.map(c => `${c.file}: ${c.before} → ${c.after} words`)
+  if (edits !== '') lines.push(`${edits} (edit mode), listed in the AI log`)
   if (log !== '') lines.push(log)
-  const body = `${lines.join('\n')}\n\nAutosaved by CoWriting: the author's own text and the AI log, committed unchanged.`
-  if (changes.length === 0) return `${log}\n\n${body}`
+  const what =
+    aiEdits > 0
+      ? `the manuscript with the author's text and ${edits} (edit mode, listed in the AI log), and the AI log`
+      : "the author's own text and the AI log"
+  const body = `${lines.join('\n')}\n\nAutosaved by CoWriting: ${what}, committed unchanged.`
+  const suffix = [edits, log].filter(x => x !== '').join(' · ')
+  if (changes.length === 0) return `${suffix}\n\n${body}`
   const names = changes.map(c => c.file.split('/').pop()!)
   const shown = names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ')
   const delta = changes.reduce((sum, c) => sum + c.after - c.before, 0)
   const words = delta === 0 ? '±0 words' : `${delta > 0 ? '+' : '−'}${Math.abs(delta)} words`
-  return `Writing: ${shown} (${words})${log === '' ? '' : ` · ${log}`}\n\n${body}`
+  return `Writing: ${shown} (${words})${suffix === '' ? '' : ` · ${suffix}`}\n\n${body}`
 }

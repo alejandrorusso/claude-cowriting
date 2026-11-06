@@ -2,7 +2,7 @@
 """CoWriting AI log: list, annotate, stats, disclosure (AI register) and the prompts appendix.
 
 The log lives in <paper>/ai-log/YYYY-MM.jsonl and is append-only. The
-CoWriting plugin writes prompt, response and guard entries; this tool appends
+CoWriting plugin writes prompt, response, guard and edit entries; this tool appends
 the author's annotations and builds the disclosure from all of them.
 Standard library only.
 
@@ -132,6 +132,21 @@ def guard_events(entries: list[dict]) -> list[dict]:
     return [e for e in entries if e.get("type") == "guard"]
 
 
+def edit_events(entries: list[dict]) -> list[dict]:
+    """Manuscript edits Claude made in edit mode: allowed by the author, and declared."""
+    return [e for e in entries if e.get("type") == "edit"]
+
+
+def edit_line(event: dict) -> str:
+    """'2026-10-05: manuscript/intro.tex (+120 words, [AI-TEXT])': one edit as the disclosure lists it."""
+    words = event.get("words", 0)
+    parts = [f"{'+' if words > 0 else ''}{words} words"] if words else []
+    if event.get("ai_text"):
+        parts.append("[AI-TEXT]")
+    detail = f" ({', '.join(parts)})" if parts else ""
+    return f"{event['ts'][:10]}: {', '.join(event.get('files', []))}{detail}"
+
+
 def manuscript_files(event: dict) -> list[str]:
     """The manuscript files among a guard event's files: what the disclosure must list."""
     return [f for f in event.get("files", []) if f.lower().startswith("manuscript/")]
@@ -189,10 +204,14 @@ def cmd_stats(root: Path, args) -> None:
     ai_text = sum(1 for t in ts if t["response"].get("ai_text_flag"))
     guards = guard_events(entries)
     in_manuscript = sum(1 for g in guards if manuscript_files(g))
+    edits = edit_events(entries)
     print(f"Turns: {len(ts)}  unannotated: {open_count}  [AI-TEXT]: {ai_text}  "
-          f"changes to your files during AI tool calls: {len(guards)} (in the manuscript: {in_manuscript})")
+          f"changes to your files during AI tool calls: {len(guards)} (in the manuscript: {in_manuscript})"
+          + (f"  manuscript edits by Claude (edit mode): {len(edits)}" if edits else ""))
     for cat, n in by_cat.most_common():
         print(f"  {cat:<12} {n}")
+    for x in edits:
+        print(f"  ✎ {edit_line(x)}")
     for g in guards:
         print(f"  ⚠ {g['ts'][:16].replace('T', ' ')}  {g.get('tool', '?')}: {', '.join(g.get('files', []))}  ({squash(g.get('input', ''), 60)})")
 
@@ -215,6 +234,13 @@ def tool_label(items: list[dict]) -> str:
     if plugin:
         parts.append("CoWriting " + ", ".join(plugin))
     return "; ".join(parts) + (f" ({', '.join(models)})" if models else "")
+
+
+def paper_mode(root: Path) -> str:
+    try:
+        return "edit" if json.loads((root / "paper.json").read_text(encoding="utf-8")).get("mode") == "edit" else "assist"
+    except (OSError, json.JSONDecodeError):
+        return "assist"
 
 
 def paper_name(root: Path) -> str:
@@ -270,6 +296,9 @@ def cmd_disclosure(root: Path, args) -> None:
         })
     ai_text = [t for t in ts if t["response"].get("ai_text_flag")]
     guards = guard_events(entries)
+    edits = edit_events(entries)
+    # a paper that was ever in edit mode says so, even after switching back
+    is_edit = paper_mode(root) == "edit" or bool(edits)
     name = paper_name(root)
 
     title = "KI-Verzeichnis" if de else "AI register (disclosure of AI use)"
@@ -287,6 +316,24 @@ def cmd_disclosure(root: Path, args) -> None:
         "AI tool call (listed below), and the manuscript's version history (git) shows how the text came about. All AI interactions "
         "were logged automatically (ai-log/)."
     )
+    if is_edit:
+        intro = (
+            f"Für die Arbeit „{name}“ wurde das generative KI-Modell Claude (Anthropic) über Claude Code mit dem "
+            "Plugin CoWriting eingesetzt: für Hinweise, Rückfragen, Erklärungen und Literaturhilfe und, im Bearbeitungsmodus "
+            "des Plugins, für Änderungen am Manuskript: Formatierung und Layout, sprachliche Glättung des Textes der Autorin bzw. "
+            "des Autors und das Ausformulieren von Stichpunkten, die die Autorin bzw. der Autor vorgegeben hat. Inhalt und Argumentation "
+            "stammen von der Autorin bzw. dem Autor. Darüber hinaus von der KI formulierte Stellen sind mit [AI-TEXT] gekennzeichnet. "
+            "Jede Änderung der KI am Manuskript wurde protokolliert (siehe unten) und von der Autorin bzw. dem Autor geprüft; "
+            "die Versionsgeschichte des Manuskripts (git) zeigt, wie der Text entstanden ist. Alle KI-Eingaben wurden automatisch "
+            "protokolliert (ai-log/)."
+            if de else
+            f"For “{name}”, the generative AI model Claude (Anthropic) was used via Claude Code with the CoWriting "
+            "plugin: for hints, questions, explanations and literature support and, in the plugin's edit mode, for changes to the "
+            "manuscript: formatting and layout, language polishing of the author's text, and turning bullet points the author gave "
+            "into prose. Content and argument are the author's. Passages the AI formulated beyond that are marked [AI-TEXT]. Every "
+            "change the AI made to the manuscript was logged (listed below) and reviewed by the author, and the manuscript's version "
+            "history (git) shows how the text came about. All AI interactions were logged automatically (ai-log/)."
+        )
     if any(t["prompt"].get("origin") == "brief" for t in ts):
         intro += (
             " Einzelne Briefing-Zeilen für die Reviewer-Personas (party.md) hat das Modell aus Diskussionen mit der Autorin bzw. dem Autor "
@@ -315,6 +362,8 @@ def cmd_disclosure(root: Path, args) -> None:
         if de else
         "The author bears full responsibility for content, sources and wording. Adapt this statement to the target institution's rules."
     )
+    edit_head = "Änderungen der KI am Manuskript (Bearbeitungsmodus)" if de else "Manuscript edits by the AI (edit mode)"
+    edit_lines = [edit_line(x) for x in edits]
     # only the manuscript is declared; a changed bibliography or setting is in the log, not the register
     guard_lines = [f"{g['ts'][:10]}: {g.get('tool', '?')} – {', '.join(manuscript_files(g))}" for g in guards if manuscript_files(g)]
 
@@ -331,6 +380,9 @@ def cmd_disclosure(root: Path, args) -> None:
             out.append("")
         out += [f"## {ai_text_head}", ""]
         out += [f"- {t['prompt']['ts'][:10]}: {squash(t['prompt'].get('text', ''), 120)}" for t in ai_text] or [none]
+        if is_edit:
+            out += ["", f"## {edit_head}", ""]
+            out += [f"- {line}" for line in edit_lines] or [none]
         out += ["", f"## {guard_head}", ""]
         out += [f"- {line}" for line in guard_lines] + ([guard_note] if guard_lines else []) or [none]
         out += ["", f"*{resp}*", ""]
@@ -351,6 +403,12 @@ def cmd_disclosure(root: Path, args) -> None:
             out.append("\\end{itemize}")
         else:
             out.append(e(none))
+        if is_edit:
+            out += [f"\\subsection*{{{e(edit_head)}}}"]
+            if edit_lines:
+                out += ["\\begin{itemize}"] + [f"  \\item {e(line)}" for line in edit_lines] + ["\\end{itemize}"]
+            else:
+                out.append(e(none))
         out += [f"\\subsection*{{{e(guard_head)}}}"]
         if guard_lines:
             out += ["\\begin{itemize}"] + [f"  \\item {e(line)}" for line in guard_lines] + ["\\end{itemize}", e(guard_note)]

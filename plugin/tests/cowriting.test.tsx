@@ -17,7 +17,11 @@ import {
   changedPaths,
   computeStats,
   countWords,
+  dropsAiTextMarker,
   isManuscriptPath,
+  newTextOf,
+  oldTextOf,
+  paperManuscriptFileOf,
   liesIn,
   limitCrossed,
   manuscriptParents,
@@ -377,6 +381,93 @@ test("in a session on a paper, Claude's own places stay closed to a manuscript f
   expect(nested.deny).toContain('CoWriting')
   const other = await $.tool.call({ tool: 'Write', file_path: '/other/manuscript/x.md', content: 'x' })
   expect(other.deny).toBeUndefined()
+})
+
+test('edit mode: the pure parts of the guard', async () => {
+  expect(paperManuscriptFileOf('/w/manuscript/main.tex', '/w')).toBe('manuscript/main.tex')
+  expect(paperManuscriptFileOf('/w/Manuscript/ch/1.md', '/w')).toBe('Manuscript/ch/1.md')
+  expect(paperManuscriptFileOf('/w/notes/../manuscript/x.tex', '/w')).toBe('manuscript/x.tex')
+  expect(paperManuscriptFileOf('/w/manuscript/../literature/refs.bib', '/w')).toBeNull()
+  expect(paperManuscriptFileOf('/w/literature/manuscript/x.md', '/w')).toBeNull()
+  expect(paperManuscriptFileOf('/other/manuscript/x.md', '/w')).toBeNull()
+  expect(paperManuscriptFileOf('/w/manuscript', '/w')).toBeNull()
+
+  expect(newTextOf({ new_string: 'a' })).toBe('a')
+  expect(newTextOf({ content: 'b' })).toBe('b')
+  expect(newTextOf({ edits: [{ new_string: 'c' }, { new_string: 'd' }] })).toBe('c\nd')
+  expect(oldTextOf({ old_string: 'x', new_string: 'y' })).toBe('x')
+  expect(dropsAiTextMarker('% [AI-TEXT]\nText', 'Text')).toBe(true)
+  expect(dropsAiTextMarker('% [AI-TEXT]\nText', '% [AI-TEXT]\nBetter text')).toBe(false)
+  expect(dropsAiTextMarker('Text', 'Text, polished')).toBe(false)
+
+  const log = [
+    { type: 'edit', ts: '2026-11-01T10:00:00Z', session: 's', paper: 'p', tool: 'Edit', input: 'm', files: ['manuscript/a.md'], words: 120, ai_text: false },
+    { type: 'edit', ts: '2026-11-01T10:01:00Z', session: 's', paper: 'p', tool: 'Edit', input: 'm', files: ['manuscript/a.md'], words: -20, ai_text: false },
+  ] as never
+  const stats = computeStats(log, new Date('2026-11-01T12:00:00Z'))
+  expect(stats.editEvents).toBe(2)
+  expect(stats.aiEditWords).toBe(120) // what was cut earns nothing back
+  expect(stats.guardEvents).toBe(0)
+  // the author grew the text from 1000 to 1500 words; 120 of them were Claude's
+  const progress = advanceGame({ ...NEW_GAME, baselineWords: 1000, maxWords: 1000 }, 1500, stats, '2026-11-01')
+  expect(progress.ownWords).toBe(380)
+})
+
+test('edit mode: file tools may edit the manuscript, logged as edits; the rest stays guarded', async ($, on) => {
+  const files = paperFiles()
+  files.set(`${ROOT}/paper.json`, JSON.stringify({ name: 'demo', format: 'latex', language: 'en', party: ['architect'], mode: 'edit' }))
+  files.set(`${ROOT}/literature/references.bib`, '@article{x}')
+  const main = `${ROOT}/manuscript/main.tex`
+  const mtimes = new Map<string, number>([[main, 1]])
+  workspace(on, files)
+  on('fs.stat', (_: unknown, e: { path: string }) => ({
+    value: { kind: 'file', size: files.get(e.path)?.length ?? 0, mtimeMs: mtimes.get(e.path) ?? 0, isLink: false },
+  }))
+  on('tool.call', (_: unknown, e: { tool: string; file_path?: string; new_string?: string }) => {
+    if (e.tool === 'Edit' && e.file_path === main) {
+      files.set(main, `${files.get(main)}\n${e.new_string}`)
+      mtimes.set(main, (mtimes.get(main) ?? 0) + 1)
+    }
+    return { result: {} }
+  })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const logOf = () => {
+    const logFile = [...files.keys()].find(k => k.startsWith(`${ROOT}/ai-log/`))
+    return logFile === undefined ? [] : parseLog(files.get(logFile)!)
+  }
+  const settle = async (n: number) => {
+    for (let i = 0; i < 50 && logOf().filter(e => e.type === 'edit').length < n; i++) await new Promise(r => setTimeout(r, 1))
+  }
+
+  const polish = await $.tool.call({ tool: 'Edit', file_path: main, old_string: 'Text', new_string: 'Fünf neue Wörter stehen hier' })
+  expect(polish.deny).toBeUndefined()
+  await settle(1)
+  const edit = logOf().find(e => e.type === 'edit')
+  expect(edit?.type === 'edit' && edit.files).toEqual(['manuscript/main.tex'])
+  expect(edit?.type === 'edit' && edit.words).toBe(5)
+  expect(edit?.type === 'edit' && edit.ai_text).toBe(false)
+  expect(logOf().some(e => e.type === 'guard')).toBe(false)
+
+  const marked = await $.tool.call({ tool: 'Edit', file_path: main, old_string: 'x', new_string: '% [AI-TEXT]\nA paragraph of my own' })
+  expect(marked.deny).toBeUndefined()
+  await settle(2)
+  expect(logOf().filter(e => e.type === 'edit').map(e => e.type === 'edit' && e.ai_text)).toEqual([false, true])
+
+  // the marker stays until the author takes it out
+  const unmark = await $.tool.call({ tool: 'Edit', file_path: main, old_string: '% [AI-TEXT]\nA paragraph', new_string: 'A paragraph' })
+  expect(unmark.deny).toContain('[AI-TEXT]')
+  // shell writes, the author's other files and other papers' manuscripts stay refused
+  expect((await $.tool.call({ tool: 'Bash', command: 'echo x >> manuscript/main.tex' })).deny).toContain('CoWriting')
+  expect((await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/literature/references.bib`, old_string: 'x', new_string: 'y' })).deny).toContain('references.bib')
+  expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/paper.json`, content: '{}' })).deny).toContain('paper.json')
+  expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/notes/ai/manuscript/x.md`, content: 'x' })).deny).toContain('CoWriting')
+})
+
+test('assist mode still refuses file tools in the manuscript', async ($, on) => {
+  workspace(on, paperFiles())
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  const denied = await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/manuscript/main.tex`, old_string: 'a', new_string: 'b' })
+  expect(denied.deny).toContain('written by its human author only')
 })
 
 test('a manuscript change during a tool call is logged as a guard event and shown', async ($, on) => {
@@ -1295,6 +1386,11 @@ test('autosave reads git status and names the words gained', async () => {
   expect(autosaveMessage([{ file: 'a.md', before: 9, after: 4 }]).split('\n')[0]).toBe('Writing: a.md (−5 words)')
   expect(autosaveMessage([{ file: 'a.md', before: 0, after: 4 }], 2).split('\n')[0]).toBe('Writing: a.md (+4 words) · AI log +2 entries')
   expect(autosaveMessage([], 1).split('\n')[0]).toBe('AI log +1 entry')
+  // edit mode: a commit under the author's name names Claude's edits
+  const edited = autosaveMessage([{ file: 'manuscript/a.md', before: 0, after: 40 }], 3, 1)
+  expect(edited.split('\n')[0]).toBe('Writing: a.md (+40 words) · 1 edit by Claude · AI log +3 entries')
+  expect(edited).toContain('1 edit by Claude (edit mode), listed in the AI log')
+  expect(edited).not.toContain("the author's own text")
 })
 
 test('autosave commits the manuscript and the AI log after a writing pause, and only then', async ($, on) => {

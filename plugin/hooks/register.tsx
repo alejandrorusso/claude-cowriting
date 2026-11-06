@@ -4,8 +4,8 @@
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, overrelianceNudge, parseBriefs, parseHints, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PaperMode, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, dropsAiTextMarker, EDIT_MARKER_MESSAGE, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, newTextOf, oldTextOf, overrelianceNudge, parseBriefs, parseHints, paperManuscriptFileOf, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -38,7 +38,7 @@ async function readJson($: Engine, path: string): Promise<any> {
   }
 }
 
-type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave' | 'versioning'>> & { domainPack?: string }
+type PaperJson = Partial<Pick<Paper, 'name' | 'format' | 'language' | 'party' | 'autosave' | 'versioning' | 'mode'>> & { domainPack?: string }
 
 /** The catalogue members of a paper's party: its roster, or for a paper.json from before rosters, the old domain pack's. */
 export const catalogParty = (json: PaperJson): string[] => {
@@ -55,6 +55,8 @@ const asPaper = (root: string, json: PaperJson): Paper => ({
   // without git there is nothing to commit to: autosave is off whatever the option says
   autosave: json.autosave !== false && json.versioning !== 'none',
   versioning: json.versioning === 'none' ? 'none' : 'git',
+  // anything but an explicit "edit" is the assist-only default
+  mode: json.mode === 'edit' ? 'edit' : 'assist',
 })
 
 /** A paper folder chosen with /cowrite:paper <path>; null: the session's folder decides. */
@@ -173,6 +175,25 @@ async function setVersioning($: Engine, paper: Paper, mode: 'git' | 'none' | und
   return mode === 'git'
     ? 'Versioning is on: from the next writing pause on, the manuscript and the AI log are saved after each change, under your git name (git config --global user.name and user.email).'
     : 'Versioning is off for this paper: nothing is saved automatically from now on, so keep your own backups. /cowrite:paper versioning git switches it back on.'
+}
+
+/**
+ * /cowrite:paper mode [assist|edit]: what Claude may do in the manuscript; with a mode, the switch.
+ * The scaffold tool writes paper.json, the deny rules in the settings and CLAUDE.md for the mode.
+ * It runs on the host, typed by the author: Claude cannot switch the mode, since paper.json, the
+ * settings and CLAUDE.md are the author's files.
+ */
+async function setMode($: Engine, paper: Paper, mode: PaperMode | undefined): Promise<string> {
+  const current =
+    paper.mode === 'edit'
+      ? 'This paper is in edit mode: Claude may edit manuscript files for formatting, language polish and turning your bullet points into prose; anything else it writes carries [AI-TEXT]. Every edit is logged and listed in the disclosure.'
+      : 'This paper is in assist mode: Claude gives feedback, questions and literature help, and never writes the manuscript.'
+  if (mode === undefined) return `${current}\nSwitch with /cowrite:paper mode edit, or /cowrite:paper mode assist.`
+  if (mode === paper.mode) return current
+  const tool = join($.plugin.root, 'tools', 'new_paper.py')
+  const run = await $.process.run(['python3', '-I', tool, '--set-mode', mode, '--dir', paper.root], { cwd: paper.root, timeoutMs: 60_000 })
+  if (run.exitCode !== 0) return `Switching the mode failed:\n${(run.stderr || run.stdout).trim()}`
+  return `${run.stdout.trim()}\nThe plugin follows the new mode from the next prompt on; restart Claude Code so its settings (the deny rules) are read again.`
 }
 
 export async function readLog($: Engine, root: string): Promise<LogEntry[]> {
@@ -497,6 +518,15 @@ async function newLogEntries($: Engine, paper: Paper, top: string, path: string)
   return (await $.fs.read(`${top}/${path}`).then(lines, () => 0)) - before
 }
 
+/** How many of the entries a log file gained since the last commit are Claude's edits (edit mode). */
+async function newEditEntries($: Engine, paper: Paper, top: string, path: string): Promise<number> {
+  const shown = await git($, paper, ['show', `HEAD:${path}`])
+  const lines = (text: string) => text.split('\n').filter(l => l.trim() !== '')
+  const before = shown.exitCode === 0 ? lines(shown.stdout).length : 0
+  const now = await $.fs.read(`${top}/${path}`).then(lines, () => [] as string[])
+  return parseLog(now.slice(before).join('\n')).filter(x => x.type === 'edit').length
+}
+
 async function wordsAt($: Engine, paper: Paper, top: string, path: string): Promise<FileChange> {
   const shown = await git($, paper, ['show', `HEAD:${path}`])
   const before = shown.exitCode === 0 ? countWords(shown.stdout, paper.format) : 0
@@ -541,8 +571,12 @@ export async function autosaveTick($: Engine): Promise<string | null> {
       changes.push(AUTOSAVE_TEXT_FILE.test(path) ? await wordsAt($, paper, top, path) : { file: path, before: 0, after: 0 })
     }
     let entries: number | null = null
-    for (const path of logged) entries = (entries ?? 0) + Math.max(0, await newLogEntries($, paper, top, path))
-    const message = autosaveMessage(changes, entries)
+    let aiEdits = 0
+    for (const path of logged) {
+      entries = (entries ?? 0) + Math.max(0, await newLogEntries($, paper, top, path))
+      aiEdits += await newEditEntries($, paper, top, path)
+    }
+    const message = autosaveMessage(changes, entries, aiEdits)
 
     await git($, paper, ['add', '-A', '--', ...changed])
     const commit = await git($, paper, ['commit', '--quiet', '-m', message, '--', ...changed])
@@ -1255,7 +1289,7 @@ export function drawPane($: Engine, e: RenderInput, props: PaneProps) {
       <Text weight="bold">
         ✍ {paper.name}{' '}
         <Text dimColor>
-          · {paper.format} · {paper.language} · assist-only{paper.versioning === 'none' ? ' · no git' : ''}
+          · {paper.format} · {paper.language} · {paper.mode === 'edit' ? 'edit mode' : 'assist-only'}{paper.versioning === 'none' ? ' · no git' : ''}
         </Text>
       </Text>
       <Box flexDirection="row">
@@ -1864,18 +1898,35 @@ const elsewhereText = (root: string) =>
   `The paper folder is ${root}, not the session's working directory. Paths like manuscript/ or ai-log/ are relative to it: ` +
   `use absolute paths under ${root} for file tools, and run shell commands and CoWriting tools from it (cd "${root}" && …).`
 
-const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: string) =>
-  [
-    '# CoWriting: assist-only mode',
+/** What Claude may do in the manuscript, by the paper's mode: the lines that differ. */
+const modeLines = (paper: Paper): string[] =>
+  paper.mode === 'edit'
+    ? [
+        '# CoWriting: edit mode',
+        'The human is the author (DFG good scientific practice). In this paper the author lets you edit the manuscript, within these limits:',
+        '- You may change files under manuscript/ with the file tools (Edit, Write), never with shell commands, for: (1) cosmetics and formatting: layout, page breaks, float placement, macros and environments, converting Markdown or notes to LaTeX, tables, cross-references, compile fixes; (2) polishing the author\'s text: grammar, spelling, punctuation, typography and light wording that keeps their meaning and argument; (3) turning bullet points the author gave you into prose, keeping their content and order and adding no claims, results or citations of your own.',
+        `- Any other text you write into the manuscript (new paragraphs, arguments, sections, an abstract not built from the author's bullets) starts with ${AI_TEXT_MARKER}, in LaTeX as a comment line \`% ${AI_TEXT_MARKER}\` right above it; tell the author it must be disclosed. Never remove an ${AI_TEXT_MARKER} marker: the author does, once they have made the passage their own.`,
+        '- Every manuscript edit is logged and listed in the disclosure. After an edit, say in one line what you changed and which of (1)-(3) it was, or that it is AI-TEXT.',
+        '- Inside the paper you also write in notes/ai/, scope.md, disclosure/, party/ (the author\'s own review experts, at their request) and the log. Every other file (literature/, CLAUDE.md, party.md, paper.json, settings) is the author\'s: ask them to change it.',
+      ]
+    : [
+        '# CoWriting: assist-only mode',
+        'The human is the sole author (DFG good scientific practice). You assist; you never ghostwrite.',
+        '- Never write or rewrite prose meant for the manuscript (no paragraphs, rephrasings, abstracts, introductions). Files under manuscript/ are read-only for you.',
+        '- Inside the paper you write only in notes/ai/, scope.md, disclosure/, party/ (the author\'s own review experts, at their request) and the log. Every other file (manuscript/, literature/, CLAUDE.md, party.md, paper.json, settings) is the author\'s: ask them to change it.',
+      ]
+
+const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: string) => {
+  const [title, ...rules] = modeLines(paper)
+  return [
+    title,
     `Active paper: "${paper.name}" (${paper.format}, ${paper.language === 'de' ? 'German' : 'English'}) at ${paper.root}.`,
     paper.root !== cwd ? elsewhereText(paper.root) : '',
-    'The human is the sole author (DFG good scientific practice). You assist; you never ghostwrite.',
-    '- Never write or rewrite prose meant for the manuscript (no paragraphs, rephrasings, abstracts, introductions). Files under manuscript/ are read-only for you.',
-    '- Inside the paper you write only in notes/ai/, scope.md, disclosure/, party/ (the author\'s own review experts, at their request) and the log. Every other file (manuscript/, literature/, CLAUDE.md, party.md, paper.json, settings) is the author\'s: ask them to change it.',
+    ...rules,
     `- The review party of this paper: ${partyPersonas(paper.party).map(p => `cowrite:${p.id} (${p.name})`).join(', ') || 'nobody yet'}. /cowrite:party changes it; a party/<id>.md file is an expert of the author's own.`,
     '- Give located feedback (file:line), Socratic questions, structure and argument critique, explanations, literature help, checklists and overviews.',
-    '- Language exception: for grammar, spelling and punctuation you may show the corrected sentence together with the rule. No stylistic rewrites.',
-    `- If the author explicitly insists on text written by you, start that text with ${AI_TEXT_MARKER} and remind them it must be disclosed.`,
+    paper.mode === 'edit' ? '' : '- Language exception: for grammar, spelling and punctuation you may show the corrected sentence together with the rule. No stylistic rewrites.',
+    paper.mode === 'edit' ? '' : `- If the author explicitly insists on text written by you, start that text with ${AI_TEXT_MARKER} and remind them it must be disclosed.`,
     '- Never invent references. Cite only with a verified DOI/URL or a citekey present in the bibliography under literature/; mark anything else UNVERIFIED.',
     '- Label literature summaries as "AI summary – read the original". No direct quotes without page numbers from the source.',
     '- Put AI notes only in notes/ai/ (header: "AI-generated (Claude), <date>, not manuscript text").',
@@ -1887,6 +1938,7 @@ const contractText = (paper: Paper, vault: string, notesFolder: string, cwd: str
   ]
     .filter(Boolean)
     .join('\n')
+}
 
 type Config = {
   vault: string
@@ -2290,6 +2342,25 @@ async function reportGuard($: Engine, cfg: Config, paper: Paper, tool: string, i
   await refresh($, cfg).catch(() => undefined)
 }
 
+/** A manuscript edit Claude made in edit mode: allowed, logged for the disclosure, and shown. */
+async function reportEdit($: Engine, cfg: Config, paper: Paper, tool: string, input: string, files: string[], words: number, isAiText: boolean): Promise<void> {
+  await appendLog($, paper.root, {
+    type: 'edit',
+    ts: new Date().toISOString(),
+    session: await $.session.id(),
+    paper: paper.name,
+    ...(turn !== null ? { ref: turn.id } : {}),
+    tool,
+    input,
+    files,
+    words,
+    ai_text: isAiText,
+  }).catch(() => undefined)
+  const delta = words === 0 ? '' : ` (${words > 0 ? '+' : ''}${words} words)`
+  $.ui.toast(`✎ Claude edited ${files.join(', ')}${delta}${isAiText ? ' · [AI-TEXT]' : ''}. Logged for the disclosure.`)
+  await refresh($, cfg).catch(() => undefined)
+}
+
 /** The plugin's version from its manifest, and the engine's, for the log. */
 async function readVersions($: Engine): Promise<{ plugin?: string; claude_code?: string }> {
   const out: { plugin?: string; claude_code?: string } = {}
@@ -2548,6 +2619,15 @@ export const register: Register = (on, options) => {
       await refresh($, cfg)
       return { text }
     }
+    // /cowrite:paper mode [assist|edit]: what Claude may do in the manuscript, and the switch
+    const mode = /^mode(?:\s+(assist|edit))?$/.exec(arg)
+    if (mode !== null) {
+      const paper = await findPaper($)
+      if (paper === null) return { text: 'No paper here: open one with /cowrite:paper <path>, or set one up with /cowrite:init.' }
+      const text = await setMode($, paper, mode[1] === 'assist' || mode[1] === 'edit' ? mode[1] : undefined)
+      await refresh($, cfg)
+      return { text }
+    }
     const text = await openPaper($, arg)
     await refresh($, cfg)
     return { text }
@@ -2749,16 +2829,25 @@ export const register: Register = (on, options) => {
     const path = String(input.file_path ?? input.notebook_path ?? '')
     const command = String(input.command ?? '')
     const isFileWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool)
-    // a paper's manuscript folder is refused wherever the paper is; a folder of that name in another project is not ours
-    if (isFileWrite && (await fileHitsPaperManuscript($, path))) return { deny: GUARD_MESSAGE }
-    if (tool === 'Bash' && (await bashHitsPaperManuscript($, command))) return { deny: GUARD_MESSAGE }
-    // inside the paper, everything but Claude's own places is the author's
     const paper = READ_ONLY_TOOLS.has(tool) ? null : await findPaper($).catch(() => null)
+    // edit mode: a file tool may change this paper's manuscript; shell commands still may not
+    const editing =
+      paper !== null && paper.mode === 'edit' && isFileWrite ? paperManuscriptFileOf(absolutePath(await $.session.cwd(), path), paper.root) : null
+    // a paper's manuscript folder is refused wherever the paper is; a folder of that name in another project is not ours
+    if (editing === null && isFileWrite && (await fileHitsPaperManuscript($, path))) return { deny: GUARD_MESSAGE }
+    if (tool === 'Bash' && (await bashHitsPaperManuscript($, command))) return { deny: GUARD_MESSAGE }
+    if (editing !== null) {
+      // an [AI-TEXT] marker stays until the author takes it out
+      const full = absolutePath(await $.session.cwd(), path)
+      const before = tool === 'Write' ? await $.fs.read(full).catch(() => '') : oldTextOf(input)
+      if (dropsAiTextMarker(before, newTextOf(input))) return { deny: EDIT_MARKER_MESSAGE }
+    }
+    // inside the paper, everything but Claude's own places is the author's
     if (paper !== null && (isFileWrite || tool === 'Bash')) {
       const cwd = await $.session.cwd()
       if (isFileWrite) {
         const file = authorFileOf(absolutePath(cwd, path), paper.root)
-        if (file !== null) return { deny: authorGuardMessage(file) }
+        if (file !== null && editing === null) return { deny: authorGuardMessage(file) }
       } else {
         const isAuthors = (target: string) => authorFileOf(absolutePath(cwd, target), paper.root) !== null
         if (bashWritesTo(command, isAuthors, await authorNames($, paper.root))) return { deny: authorGuardMessage('the file this command writes') }
@@ -2784,11 +2873,20 @@ export const register: Register = (on, options) => {
     // while this call ran is recorded, shown and disclosed, so the git history can be read against it.
     if (paper === null) return next(e)
     const before = await fingerprintAuthorFiles($, paper).catch(() => null)
+    const wordsBefore = editing !== null ? await manuscriptWords($, paper).catch(() => null) : null
     const result = await next(e)
     if (before === null) return result
     const after = await fingerprintAuthorFiles($, paper).catch(() => null)
     const files = after === null ? [] : changedFiles(before, after)
-    if (files.length > 0) void reportGuard($, cfg, paper, tool, guardInputOf(tool, input), files)
+    // the file an allowed edit named is an edit; any other change is a guard event, as always
+    const edited = editing === null ? [] : files.filter(f => f.toLowerCase() === editing.toLowerCase())
+    const others = files.filter(f => !edited.includes(f))
+    if (edited.length > 0) {
+      const wordsAfter = wordsBefore !== null ? await manuscriptWords($, paper).catch(() => null) : null
+      const words = wordsBefore !== null && wordsAfter !== null ? wordsAfter - wordsBefore : 0
+      void reportEdit($, cfg, paper, tool, guardInputOf(tool, input), edited, words, newTextOf(input).includes(AI_TEXT_MARKER))
+    }
+    if (others.length > 0) void reportGuard($, cfg, paper, tool, guardInputOf(tool, input), others)
     return result
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'CoWriting: the manuscript guard failed, so the call was refused.' }))
 

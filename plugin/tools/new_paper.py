@@ -3,6 +3,7 @@
 
     python3 new_paper.py --format latex --lang de [--party grammar-guy,reviewer-2,…] [--project my-paper] [--name "My paper"] [--dir PATH]
     python3 new_paper.py --upgrade [--apply] [--dir PATH]
+    python3 new_paper.py --set-mode assist|edit [--dir PATH]
 
 Without --project the current folder (or --dir) becomes the paper. With --project the
 paper goes to projects/<name>/ and .active-project points at it. --party names the
@@ -13,13 +14,20 @@ overwritten.
 --upgrade brings a workspace from an earlier plugin version up to date: the deny rules
 and sandbox paths the settings lack, the plugin's current CLAUDE.md (the author's copy
 is kept under .cowriting/upgrade/<time>/), the party roster in paper.json, and template
-files that are missing. Without --apply it only reports. Standard library only.
+files that are missing. Without --apply it only reports.
+
+--set-mode switches what Claude may do in the manuscript: assist (default: never writes it) or
+edit (may edit it for formatting, polish and the author's bullet points; anything else carries
+[AI-TEXT]; every edit is logged). It writes the mode into paper.json, the matching deny rules
+into the settings and the mode's CLAUDE.md (the author's copy is kept under .cowriting/upgrade/).
+Standard library only.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -31,15 +39,50 @@ CATALOG = ("grammar-guy", "statistics-nerd", "reviewer-2", "librarian", "archite
            "style-coach", "terminologist", "clinician")
 DEFAULT_PARTY = tuple(p for p in CATALOG if p != "clinician")
 SETTINGS = Path(".claude") / "settings.json"
+MODES = ("assist", "edit")
+# CLAUDE.md for a mode other than assist; assist's is the workspace template's own
+MODE_RULES = {"edit": Path(__file__).resolve().parent.parent / "templates" / "modes" / "edit" / "CLAUDE.md"}
+
+
+def mode_of(paper: dict) -> str:
+    return "edit" if paper.get("mode") == "edit" else "assist"
+
+
+def is_manuscript_rule(rule: str) -> bool:
+    """A deny rule or sandbox path that protects the manuscript folder: what edit mode lifts."""
+    return re.search(r"(^|[/(.])manuscript($|[/)])", rule.lower()) is not None
+
+
+def for_mode(settings: dict, mode: str) -> dict:
+    """The settings as the mode needs them: edit mode drops the manuscript's deny rules and sandbox paths."""
+    out = json.loads(json.dumps(settings))
+    if mode != "edit":
+        return out
+    permissions = out.get("permissions", {})
+    if "deny" in permissions:
+        permissions["deny"] = [r for r in permissions["deny"] if not is_manuscript_rule(r)]
+    fs = out.get("sandbox", {}).get("filesystem", {})
+    if "denyWrite" in fs:
+        fs["denyWrite"] = [r for r in fs["denyWrite"] if not is_manuscript_rule(r)]
+    return out
+
+
+def rules_template(mode: str) -> Path:
+    return MODE_RULES.get(mode, TEMPLATE / "CLAUDE.md")
 
 
 def union(old: list, new: list) -> list:
     return old + [x for x in new if x not in old]
 
 
-def merged_settings(current: dict, fresh: dict) -> tuple[dict, list[str]]:
-    """The settings with the paper's deny rules and sandbox paths added, and what the addition is."""
-    out = json.loads(json.dumps(current))
+def merged_settings(current: dict, fresh: dict, mode: str = "assist") -> tuple[dict, list[str]]:
+    """The settings with the paper's deny rules and sandbox paths added, and what the addition is.
+
+    In edit mode the manuscript's rules are neither added nor kept: they would refuse the edits
+    the author allowed.
+    """
+    fresh = for_mode(fresh, mode)
+    out = for_mode(current, mode)
     permissions = out.setdefault("permissions", {})
     deny = permissions.get("deny", [])
     permissions["deny"] = union(deny, fresh["permissions"]["deny"])
@@ -53,6 +96,10 @@ def merged_settings(current: dict, fresh: dict) -> tuple[dict, list[str]]:
     network["allowLocalBinding"] = True
     network["allowedDomains"] = union(network.get("allowedDomains", []), fresh["sandbox"]["network"]["allowedDomains"])
     added = []
+    lifted = [r for r in current.get("permissions", {}).get("deny", []) if r not in permissions["deny"]]
+    lifted += [r for r in current.get("sandbox", {}).get("filesystem", {}).get("denyWrite", []) if r not in fs["denyWrite"]]
+    if lifted:
+        added.append(f"{len(lifted)} manuscript rule(s) lifted for edit mode")
     if len(permissions["deny"]) > len(deny):
         added.append(f"{len(permissions['deny']) - len(deny)} deny rule(s)")
     if len(fs["denyWrite"]) > len(paths):
@@ -62,14 +109,14 @@ def merged_settings(current: dict, fresh: dict) -> tuple[dict, list[str]]:
     return out, added
 
 
-def merge_settings(path: Path, fresh: dict) -> list[str]:
+def merge_settings(path: Path, fresh: dict, mode: str = "assist") -> list[str]:
     """Add the paper's deny rules and sandbox paths to the folder's Claude Code settings, keeping what is there.
 
     Claude Code reads project settings from the folder it runs in, so with --project the rules
     live at the workspace root, prefixed with projects/<name>/, one paper after another.
     """
     current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    merged, added = merged_settings(current, fresh)
+    merged, added = merged_settings(current, fresh, mode)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
     return added
@@ -102,6 +149,7 @@ def upgrade(root: Path, apply: bool) -> int:
         print(f"{root} is not a CoWriting paper: no paper.json.")
         return 1
     paper = json.loads(paper_json.read_text(encoding="utf-8"))
+    mode = mode_of(paper)
     # a paper under projects/<name>/ keeps its settings at the workspace root
     is_project = root.parent.name == "projects" and not (root / SETTINGS).exists()
     prefix = f"projects/{root.name}/" if is_project else ""
@@ -118,7 +166,7 @@ def upgrade(root: Path, apply: bool) -> int:
     # the settings: additive, so the author's own rules stay
     fresh = json.loads(rendered(TEMPLATE / SETTINGS, values))
     current = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
-    merged, added = merged_settings(current, fresh)
+    merged, added = merged_settings(current, fresh, mode)
     shown = settings_path.relative_to(root) if settings_path.is_relative_to(root) else settings_path
     if added:
         todo.append(f"~ {shown}: {', '.join(added)} to add")
@@ -128,7 +176,7 @@ def upgrade(root: Path, apply: bool) -> int:
             done.append(f"~ {shown}: {', '.join(added)} added")
 
     # CLAUDE.md: the plugin's rules; the author's copy is kept next to the log
-    rules = rendered(TEMPLATE / "CLAUDE.md", values)
+    rules = rendered(rules_template(mode), values)
     rules_path = root / "CLAUDE.md"
     if not rules_path.exists():
         todo.append("+ CLAUDE.md")
@@ -180,6 +228,31 @@ def upgrade(root: Path, apply: bool) -> int:
     return 0
 
 
+def set_mode(root: Path, mode: str) -> int:
+    """Write the mode into paper.json, then bring the settings and CLAUDE.md in line with it."""
+    paper_json = root / "paper.json"
+    if not paper_json.exists():
+        print(f"{root} is not a CoWriting paper: no paper.json.")
+        return 1
+    paper = json.loads(paper_json.read_text(encoding="utf-8"))
+    if mode_of(paper) == mode:
+        print(f"This paper is already in {mode} mode.")
+        return 0
+    # assist is the default and is left out, as versioning's git is
+    paper = {k: v for k, v in paper.items() if k != "mode"}
+    if mode != "assist":
+        paper["mode"] = mode
+    paper_json.write_text(json.dumps(paper, indent=2) + "\n", encoding="utf-8")
+    print(f"~ paper.json: mode {mode}")
+    status = upgrade(root, True)
+    if mode == "edit":
+        print("Edit mode: Claude may edit manuscript files for formatting, language polish and your bullet points; "
+              "anything else it writes carries [AI-TEXT]. Every edit is logged and listed in the disclosure.")
+    else:
+        print("Assist mode: Claude no longer writes the manuscript; its earlier edits stay in the log and the disclosure.")
+    return status
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--format", choices=("latex", "markdown"))
@@ -191,10 +264,15 @@ def main() -> None:
     parser.add_argument("--dir", type=Path, help="folder to set up (default: the current folder)")
     parser.add_argument("--versioning", choices=("git", "none"), default="git",
                         help="git: a repository, autosave and a history to compare (default); none: nothing is saved automatically")
+    parser.add_argument("--mode", choices=MODES, default="assist",
+                        help="assist: Claude never writes the manuscript (default); edit: Claude may edit it, every edit logged")
+    parser.add_argument("--set-mode", choices=MODES, help="switch an existing paper's mode")
     parser.add_argument("--upgrade", action="store_true", help="bring an existing paper up to this plugin version")
     parser.add_argument("--apply", action="store_true", help="with --upgrade: make the changes instead of listing them")
     args = parser.parse_args()
 
+    if args.set_mode:
+        raise SystemExit(set_mode((args.dir.expanduser().resolve() if args.dir else Path.cwd()), args.set_mode))
     if args.upgrade:
         raise SystemExit(upgrade((args.dir.expanduser().resolve() if args.dir else Path.cwd()), args.apply))
     if args.format is None:
@@ -213,6 +291,8 @@ def main() -> None:
     values = render_values(name, args.format, args.lang, f"projects/{args.project}/" if args.project else "")
 
     def render(src: Path) -> str:
+        if src == TEMPLATE / "CLAUDE.md":
+            src = rules_template(args.mode)
         return rendered(src, values)
 
     skip = "main.md" if args.format == "latex" else "main.tex"
@@ -222,7 +302,7 @@ def main() -> None:
             continue
         rel = src.relative_to(TEMPLATE)
         if rel == SETTINGS and args.project:
-            merge_settings(cwd / SETTINGS, json.loads(render(src)))
+            merge_settings(cwd / SETTINGS, json.loads(render(src)), args.mode)
             created.append(f"{SETTINGS} (at the workspace root, merged)")
             continue
         dst = root / rel
@@ -230,7 +310,9 @@ def main() -> None:
             kept.append(str(rel))
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.suffix in (".md", ".tex", ".json", ".bib", "") or src.name.startswith("."):
+        if rel == SETTINGS:
+            dst.write_text(json.dumps(for_mode(json.loads(render(src)), args.mode), indent=2) + "\n", encoding="utf-8")
+        elif src.suffix in (".md", ".tex", ".json", ".bib", "") or src.name.startswith("."):
             dst.write_text(render(src), encoding="utf-8")
         else:
             shutil.copy2(src, dst)
@@ -245,6 +327,8 @@ def main() -> None:
     paper_json = root / "paper.json"
     if not paper_json.exists():
         paper = {"name": name, "format": args.format, "language": args.lang, "party": party}
+        if args.mode != "assist":
+            paper["mode"] = args.mode
         if versioning == "none":
             paper["versioning"] = "none"
         paper_json.write_text(json.dumps(paper, indent=2) + "\n", encoding="utf-8")

@@ -19,9 +19,10 @@ Target folder: `$ARGUMENTS` if given (a path, `~` allowed; it must exist), else 
    Also ask for a short paper name (lowercase, dashes) if a project layout is chosen.
 2. Run:
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/tools/new_paper.py" --format <latex|markdown> --lang <en|de> --party <id,id,…> --versioning <git|none> [--project <name>] [--dir "<target folder>"]
+   python3 "${CLAUDE_PLUGIN_ROOT}/tools/new_paper.py" --format <latex|markdown> --lang <en|de> --party <id,id,…> --versioning <git|none> [--mode edit] [--project <name>] [--dir "<target folder>"]
    ```
    `--party` takes the catalogue ids the author chose (grammar-guy, statistics-nerd, reviewer-2, librarian, architect, integrity-guardian, lay-reader, style-coach, terminologist, clinician); leave it out for the nine general ones.
+   Pass `--mode edit` only when the author asked for edit mode themselves (Claude may then edit the manuscript for formatting, polish and the author's bullet points, every edit logged); never suggest it. The default is assist-only, and `/cowrite:paper mode edit` switches later.
    It never overwrites existing files. With `--versioning git` it runs `git init` if the folder is not a repository; with `none` it writes `"versioning": "none"` into `paper.json` and never calls git. If git is not installed it sets the paper up without versioning and says so in a `!` line: pass that on. With a target folder, run every later shell command from it (`cd "<target folder>" && …`) and use absolute paths under it.
    If the output lists text outside the manuscript folder (`!` lines), tell the author to move those files into `manuscript/` themselves, in place of the skeleton file if they like. Don't move them yourself.
 3. Show what was created and explain the next steps briefly:

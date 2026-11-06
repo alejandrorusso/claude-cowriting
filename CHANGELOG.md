@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Edit mode.** A paper can be switched from assist-only to edit mode with `/cowrite:paper mode edit` (back with `/cowrite:paper mode assist`; `/cowrite:paper mode` says which it is). In edit mode Claude may change files in `manuscript/` with its file tools for formatting, polishing the author's text and turning the author's bullet points into prose; anything else it writes there starts with `[AI-TEXT]`, and an edit that would drop that marker is refused. Shell writes to the manuscript stay refused, and the author's other files stay theirs. The mode lives in `paper.json` (`"mode": "edit"`; assist is the default and left out) and is written only by `new_paper.py --set-mode`, which the command runs on the host, so Claude cannot switch it. The switch also lifts the manuscript's deny rules and sandbox path in `.claude/settings.json` and puts the edit-mode `CLAUDE.md` in place (the author's copy kept under `.cowriting/upgrade/`); `/cowrite:paper upgrade` and `/cowrite:init --mode` respect the mode.
+- **Every edit is on the record.** An allowed manuscript edit is logged as an `edit` entry (tool, files, words gained, whether it carries `[AI-TEXT]`) instead of a `guard` entry, shown as a toast, and listed in the disclosure under *Manuscript edits by the AI (edit mode)*; the disclosure's opening paragraph describes edit mode whenever the paper is or was in it. Autosave commits name Claude's edits in their title and body. Words Claude's edits add are taken off the author's own words, so they earn no writer XP. The pane header says `edit mode`.
+
 ## 0.3.5 (2026-11-04)
 
 - **Feedback reads as Markdown, with the buttons on top.** An opened input on the Feedback tab was drawn as raw text, so a persona's headings, bold and tables showed as `##`, `**` and `|`, and in the VS Code pane a long report pushed the choices out of reach. The report, Claude's words and the diff summary are now Markdown elements, and the four choices, Reply, "What did I change since?" and the comment field sit above the text.

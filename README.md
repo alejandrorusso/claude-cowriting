@@ -270,6 +270,20 @@ Counting needs no AI. Whether a point is actually *made* does: `/cowrite:scope c
 
 You can insist. Claude then marks the passage `[AI-TEXT]`, the log flags it, and the disclosure lists it. Nothing is hidden.
 
+### Edit mode
+
+Assist-only is the default, and some authors want a little more: a section moved to a new page, notes turned into LaTeX, a typo fixed in place, or a paragraph written out from bullet points they wrote themselves. For that, a paper can be switched to **edit mode**, by you and only by you:
+
+```
+/cowrite:paper mode edit      # Claude may edit the manuscript, within limits
+/cowrite:paper mode assist    # back to assist-only (the default)
+/cowrite:paper mode           # which mode this paper is in
+```
+
+In edit mode Claude may change files in `manuscript/` with its file tools for three things: **formatting** (layout, page breaks, floats, macros, conversions, tables, cross-references, compile fixes), **polishing your text** (grammar, spelling, punctuation, light wording that keeps your meaning) and **turning your bullet points into prose** (your content and order, no claims or citations of its own). Anything else it writes into the manuscript starts with `[AI-TEXT]` (in LaTeX as a `% [AI-TEXT]` comment line), and only you remove that marker: an edit that would drop one is refused.
+
+What stays the same: shell commands still may not write the manuscript, your other files (`literature/`, `CLAUDE.md`, `paper.json`, the settings) stay yours, and Claude cannot switch the mode itself, since the switch writes `paper.json`, the settings and `CLAUDE.md`. What edit mode adds is a record: every edit is logged as an `edit` entry (file, words added, whether it carries `[AI-TEXT]`), shown above the prompt, listed in the disclosure under *Manuscript edits by the AI (edit mode)*, and named in the autosave commit, so a commit under your name never passes Claude's edits off as yours. Words Claude adds earn no writer XP. The disclosure's opening paragraph says the paper used edit mode, even after you switch back. The switch writes `"mode": "edit"` into `paper.json`, lifts the manuscript's deny rules in `.claude/settings.json` and replaces `CLAUDE.md` with the edit-mode rules (your copy goes to `.cowriting/upgrade/<time>/`); restart Claude Code afterwards so the settings are read again.
+
 ### The manuscript guard
 
 Inside a paper, Claude writes only in its own places: `notes/ai/`, `ai-log/`, `disclosure/`, `scope.md` (your answers to the plan), `party/` (your own experts, from your answers), `.cowriting/` and `build/`. Everything else is yours: `manuscript/`, `literature/`, `CLAUDE.md`, `party.md`, `paper.json`, `.claude/`, `.vscode/`. Four layers keep it that way, and each has a known reach:
@@ -279,7 +293,7 @@ Inside a paper, Claude writes only in its own places: `notes/ai/`, `ai-log/`, `d
 3. **The workspace's settings** (`.claude/settings.json`, written by `/cowrite:init`, added to an older workspace by `/cowrite:paper upgrade apply`) add Claude Code's own enforcement: `Edit` deny rules for your files, which also bind subagents, and the Bash sandbox with your folders on its write deny list, so the operating system refuses a shell write whatever the command looks like. With the sandbox on, Claude Code runs sandboxed commands without a permission prompt (its default; set `sandbox.autoAllowBashIfSandboxed` to `false` to keep the prompts). The sandbox also cuts the shell off from the network: the settings allow `doi.org` and `api.crossref.org` for `verify_refs.py`, and on macOS the local Zotero API; on Linux the Zotero search needs `sandbox.excludedCommands`. Any other host prompts you once. In the `projects/<name>/` layout the rules live at the workspace root, one paper after another.
 4. **After any writing tool ran**, your files are compared with how they were before. A change is logged as a `guard` entry with the tool and the files, shown above the prompt, counted in the pane and, for manuscript files, listed in the disclosure under *Manuscript changes detected during AI tool calls*. Check the git diff when you see one.
 
-The guard refuses what it can recognise, the sandbox refuses what the patterns cannot see, and the comparison records the rest. For a technical guarantee that holds even with the plugin off, run Claude Code in a container with `manuscript/` and `literature/` mounted read-only and edit on the host. What no layer can see is text you paste from the chat yourself. For that, the `[AI-TEXT]` marker and your own annotations are the record.
+The guard refuses what it can recognise, the sandbox refuses what the patterns cannot see, and the comparison records the rest. In edit mode, layer 1 lets file tools into this paper's `manuscript/`, layer 3 drops the manuscript's rules, and layer 4 logs those edits as `edit` entries instead of `guard` entries; everything else works as above. For a technical guarantee that holds even with the plugin off, run Claude Code in a container with `manuscript/` and `literature/` mounted read-only and edit on the host. What no layer can see is text you paste from the chat yourself. For that, the `[AI-TEXT]` marker and your own annotations are the record.
 
 ## The review party
 
