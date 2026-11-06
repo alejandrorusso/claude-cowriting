@@ -481,6 +481,12 @@ export const GUARD_MESSAGE =
   'only natural persons are authors). Give located feedback, questions or corrected example sentences in the chat instead; ' +
   'the author decides what goes into the text.'
 
+/** The shell refusal in edit mode: the manuscript is open to file tools, so say how to get the job done. */
+export const EDIT_SHELL_MESSAGE =
+  'CoWriting (edit mode): shell commands may not write in manuscript/, and a `cd` into it followed by a copy, move or ' +
+  'redirect counts as writing there. Change manuscript files with Edit or Write. To build, run from outside the folder, ' +
+  'e.g. `latexmk -pdf -cd -outdir=$TMPDIR/build manuscript/main.tex`.'
+
 /** The refusal for any other file of the author's: it names the file and where Claude may write. */
 export const authorGuardMessage = (file: string): string =>
   `CoWriting: ${file} belongs to the author of this paper and is not changed by Claude. ` +

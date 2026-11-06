@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Count, FocusMode, GameFile, LiveHint, LogEntry, Paper, PaperMode, PointStatus, PromptEntry, Reading, ReadingState, RecentTurn, Review, ScopePoint, ScopeProgress, ScopeSection, Snapshot, Stage, Tab, ThreadLink, Usage, WatchState } from '../types'
-import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, dropsAiTextMarker, EDIT_MARKER_MESSAGE, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, newTextOf, oldTextOf, overrelianceNudge, parseBriefs, parseHints, paperManuscriptFileOf, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
+import { absolutePath, ACHIEVEMENTS, advanceGame, AI_TEXT_MARKER, appendBrief, authorFileOf, authorGuardMessage, autosaveMessage, bashTouchesManuscript, bashWritesTo, BRIEF_FILE, briefFor, briefLines, briefProposalPrompt, briefProposalSystem, categoryFor, changedFiles, changedParagraphs, changedPaths, changeSummaryPrompt, changeSummarySystem, computeStats, countWords, cut, cutDiff, dropsAiTextMarker, EDIT_MARKER_MESSAGE, EDIT_SHELL_MESSAGE, EMPTY_STATS, EMPTY_USAGE, GUARD_MESSAGE, guardInputOf, handBackAgentId, isAuthorsName, isManuscriptPath, liesIn, limitCrossed, localTime, manuscriptParents, manuscriptPathsIn, monthFile, NEW_GAME, newId, newTextOf, oldTextOf, overrelianceNudge, parseBriefs, parseHints, paperManuscriptFileOf, parseLog, personaForAgent, plural, readable, READ_ONLY_TOOLS, setBrief, shellPath, toUsage, usageParts, usageShort, USE_LABELS, WATCH_DEFAULT, watchExcerpt, watchSystem, xpForLevel } from './core'
 import type { FileChange, Fingerprint, Paragraph } from './core'
 import { CUSTOM_TOOLS, customDescription, customPersonas, DEFAULT_PARTY, isCustomId, parsePersonaFile, partyPersonas, personaById, personaFileSkeleton, PERSONAS, setCustomPersonas } from './personas'
 import type { CustomPersona, Persona } from './personas'
@@ -2835,7 +2835,9 @@ export const register: Register = (on, options) => {
       paper !== null && paper.mode === 'edit' && isFileWrite ? paperManuscriptFileOf(absolutePath(await $.session.cwd(), path), paper.root) : null
     // a paper's manuscript folder is refused wherever the paper is; a folder of that name in another project is not ours
     if (editing === null && isFileWrite && (await fileHitsPaperManuscript($, path))) return { deny: GUARD_MESSAGE }
-    if (tool === 'Bash' && (await bashHitsPaperManuscript($, command))) return { deny: GUARD_MESSAGE }
+    if (tool === 'Bash' && (await bashHitsPaperManuscript($, command))) {
+      return { deny: paper !== null && paper.mode === 'edit' ? EDIT_SHELL_MESSAGE : GUARD_MESSAGE }
+    }
     if (editing !== null) {
       // an [AI-TEXT] marker stays until the author takes it out
       const full = absolutePath(await $.session.cwd(), path)

@@ -458,6 +458,11 @@ test('edit mode: file tools may edit the manuscript, logged as edits; the rest s
   expect(unmark.deny).toContain('[AI-TEXT]')
   // shell writes, the author's other files and other papers' manuscripts stay refused
   expect((await $.tool.call({ tool: 'Bash', command: 'echo x >> manuscript/main.tex' })).deny).toContain('CoWriting')
+  // in edit mode the shell refusal says how to edit and build instead of asking for chat feedback
+  const build = await $.tool.call({ tool: 'Bash', command: `cd ${ROOT}/manuscript && cp main.pdf $TMPDIR/old.pdf; latexmk -pdf main.tex` })
+  expect(build.deny).toContain('edit mode')
+  expect(build.deny).toContain('latexmk -pdf -cd')
+  expect(build.deny).not.toContain('feedback')
   expect((await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/literature/references.bib`, old_string: 'x', new_string: 'y' })).deny).toContain('references.bib')
   expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/paper.json`, content: '{}' })).deny).toContain('paper.json')
   expect((await $.tool.call({ tool: 'Write', file_path: `${ROOT}/notes/ai/manuscript/x.md`, content: 'x' })).deny).toContain('CoWriting')
